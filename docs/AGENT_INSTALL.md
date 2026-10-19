@@ -43,8 +43,15 @@
     ./install.sh --non-interactive --sources musicdl --extend
   - 洛雪 lxmusic（--lx-source-url 必填）：
     ./install.sh --non-interactive --sources lxmusic --lx-source-url '<URL>' --extend
-  - 大模型推荐兜底（可选；密钥仅写入 .env，禁止 echo）：
+  - 保存大模型接口（可选；密钥仅写入 .env，禁止 echo）：
     追加 --enable-recommend --llm-base-url '<URL>' --llm-api-key '<KEY>' --llm-model '<模型>'
+    接口配置不会自动启用用途。FNMUSIC_LLM_LIKED_ENABLED 与 FNMUSIC_LLM_DAILY_ENABLED
+    默认 false，须经用户明确选择后在 WebUI 或 .env 启用；接口不完整时不会调用模型。
+    每日推荐仍受 FNMUSIC_RECOMMEND_DAILY 总开关控制，原生 -> 已启用大模型 -> 本地兜底。
+    猜你喜欢间隔 FNMUSIC_LIKED_REFRESH_HOURS 为有限数且 >=0.5（默认0.5，无上限）；
+    数量 FNMUSIC_LIKED_SIZE 为0..100整数（默认20，0在用途生效时停止生成和展示）。
+    本地候选门槛20不随目标数量改变；取消用途保留参数并恢复旧纯本地链路。
+    保存生效后后台预生成首批，每批首次获取后按间隔预生成下一批；未获取批次不会过期。
   - 若安装时未加 --extend，则需在安装完成后显式执行 ./extend.sh。
 
 步骤 4：端到端健康检查与验收
