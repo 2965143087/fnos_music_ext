@@ -5,6 +5,14 @@
 
 ## [Unreleased]
 
+## [2.11.1] - 2026-10-28
+
+### 修复
+- 修复 2.11.0 的 FPK 在飞牛应用中心**安装失败**：打包机（Windows，`core.autocrlf=true`）把 shell / systemd / 配置脚本以 CRLF 写进包，飞牛上执行 `set -euo pipefail\r` 报 `set: pipefail: invalid option`，安装器随即判定失败（日志表现为「音乐源数据已保留至 /vol1/fnmusic-ext-data」后接该报错）。
+  - `packaging/fpk/build_offline.py`：压包前对 staging 内文本文件统一归一化为 LF（按内容跳过二进制，不依赖打包机 git 配置）。
+  - 新增 `.gitattributes`（`* text=auto eol=lf` + 二进制白名单），从源头避免 Windows 检出成 CRLF。
+  - `VERSION` 升至 2.11.1，重新出包。
+
 ## [2.11.0] - 2026-10-28
 
 ### 新增

@@ -1,0 +1,23 @@
+# 统一行尾：本项目的 shell / systemd / 配置一律 LF。
+# 背景：仓库在 Windows 上以 core.autocrlf=true 检出会得到 CRLF，
+# 打进 fpk 后在飞牛（Linux）执行会报 "set: pipefail: invalid option"，
+# 应用中心安装直接失败（v2.11.0 事故根因）。
+* text=auto eol=lf
+
+# 二进制：禁止任何行尾/编码转换
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.webp binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.zip binary
+*.tgz binary
+*.tar binary
+*.gz binary
+*.fpk binary
+*.so binary
+*.node binary

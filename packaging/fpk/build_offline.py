@@ -189,6 +189,51 @@ def stage_app(repo_root: Path, stage: Path) -> int:
     return count
 
 
+TEXT_EXTS = {
+    ".sh", ".bash", ".zsh", ".py", ".js", ".mjs", ".ts", ".html", ".htm", ".css",
+    ".json", ".md", ".txt", ".yml", ".yaml", ".in", ".service", ".conf", ".ini",
+    ".cfg", ".example", ".version", ".toml", ".xml", ".csv", ".env", ".sql",
+}
+TEXT_BASENAMES = {"Dockerfile", ".dockerignore", ".gitignore", ".zcodeignore", "manifest", "install"}
+
+
+def _is_text_file(path: Path) -> bool:
+    if path.suffix.lower() in TEXT_EXTS:
+        return True
+    if path.name in TEXT_BASENAMES or path.name.startswith("."):
+        return True
+    return False
+
+
+def normalize_text_tree(root: Path) -> int:
+    """把 staging 目录里的文本文件统一成 LF。
+
+    Windows 产物最常见的翻车点：脚本以 CRLF 进包，飞牛上执行报
+    `set: pipefail: invalid option`，应用中心直接判定安装失败。这里按内容
+    兜底（含 NUL 字节一律当二进制跳过），不依赖打包机的 git 配置。
+    """
+    fixed = 0
+    for item in root.rglob("*"):
+        if not item.is_file():
+            continue
+        if item.suffix.lower() in {".png", ".jpg", ".jpeg", ".gif", ".ico", ".webp",
+                                   ".woff", ".woff2", ".ttf", ".zip", ".tgz", ".fpk", ".gz"}:
+            continue
+        if not _is_text_file(item):
+            continue
+        try:
+            data = item.read_bytes()
+        except OSError:
+            continue
+        if b"\r\n" not in data or b"\x00" in data:
+            continue
+        item.write_bytes(data.replace(b"\r\n", b"\n"))
+        fixed += 1
+    if fixed:
+        log(f"已归一化 LF：{fixed} 个文本文件")
+    return fixed
+
+
 def pack_app_tgz(stage: Path, mtime: float) -> Path:
     """把 stage/app 压成 app.tgz（内层路径 repo/... 与 ui/...）。
 
@@ -288,7 +333,9 @@ def build_fpk(stage: Path, out_dir: Path, version: str, mtime: float) -> Path:
     md5 = hashlib.md5(app_tgz.read_bytes()).hexdigest()
 
     manifest_path = stage / "manifest"
-    manifest_path.write_text(render_manifest(version, md5), encoding="utf-8")
+    # newline="\n"：Windows 上 write_text 默认把 \n 转成 \r\n，manifest 的每个值
+    # 都会带 \r（应用中心解析版本号/校验和时会取到脏值）
+    manifest_path.write_text(render_manifest(version, md5), encoding="utf-8", newline="\n")
 
     # 外层条目：app.tgz 在前，其后按名字排序（与官方包一致）
     entries: list[Path] = []
@@ -366,7 +413,6 @@ def main(argv: list[str] | None = None) -> int:
         log(f"已注入打赏二维码：{alipay}")
     inject_lxserver_artifacts(stage, Path(args.artifact_dir) if args.artifact_dir else None,
                               allow_missing=args.allow_missing_artifacts)
-    pack_app_tgz(stage, mtime)
 
     # 应用骨架
     for name in ("cmd", "config", "wizard"):
@@ -375,6 +421,16 @@ def main(argv: list[str] | None = None) -> int:
             shutil.copytree(src, stage / name)
     for name in ("ICON.PNG", "ICON_256.PNG"):
         shutil.copyfile(FPK_DIR / name, stage / name)
+
+    # 行尾归一化必须在压 app.tgz 之前：保证包内脚本是 LF
+    normalize_text_tree(stage / "app")
+    for name in ("cmd", "config", "wizard"):
+        target = stage / name
+        if target.is_dir():
+            normalize_text_tree(target)
+
+    pack_app_tgz(stage, mtime)
+
     os.chmod(stage / "cmd", DIR_MODE)
     for item in (stage / "cmd").iterdir():
         os.chmod(item, CMD_MODE)
