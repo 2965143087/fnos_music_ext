@@ -2519,3 +2519,20 @@ def test_static_dir_falls_back_to_bundled(monkeypatch, tmp_path):
         assert (mod.STATIC_DIR / "index.html").is_file()
     finally:
         sys.modules.pop(name, None)
+
+
+def test_index_versions_static_assets(env_file, monkeypatch):
+    """静态资源 URL 必须带 ?v=<版本>。
+
+    飞牛桌面 iframe 对子资源同样长期缓存：只给页面 URL 加版本号时，
+    HTML 已是新版、app.js 仍是旧的——旧 JS 引用已删除的 DOM（#panel-musicbox）
+    会抛错，导致"卡片在、面板空白"（2.11.6 实测）。
+    """
+    version_file = env_file.parent / "VERSION"
+    version_file.write_text("9.9.9\n", encoding="utf-8")
+    monkeypatch.setattr(webui, "VERSION_PATH", version_file)
+    with authed_client() as client:
+        html = client.get("/").text
+    assert "/static/app.js?v=9.9.9" in html
+    assert "/static/style.css?v=9.9.9" in html
+    assert "/static/app.js\"" not in html  # 不允许无版本号引用

@@ -2020,9 +2020,30 @@ async def api_logs_export():
 
 # ------------------------------------------------------------------ 静态前端 --
 
+_STATIC_VER_RE = re.compile(r'(/static/[A-Za-z0-9_.-]+\.(?:js|css))(?:\?v=[^"\']*)?')
+
+
+def _static_version() -> str:
+    """版本号：用于给前端资源 URL 去缓存，取 VERSION 文件内容。"""
+    try:
+        return VERSION_PATH.read_text(encoding="utf-8").strip() or "0"
+    except OSError:
+        return "0"
+
+
 @app.get("/")
 async def index():
-    return FileResponse(STATIC_DIR / "index.html")
+    """首页：把 /static/*.js|css 的引用改写成带 ?v=<版本> 的地址。
+
+    飞牛桌面用 iframe 加载管理页，桌面壳对子资源同样会长期缓存：只给页面 URL
+    加版本号时，HTML 换了、app.js 还是旧的——旧 JS 引用已被删掉的 DOM 节点
+    （如 #panel-musicbox）会抛错，后续面板显隐全部不执行，表现为"卡片在、面板空白"。
+    """
+    html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
+    version = _static_version()
+    html = _STATIC_VER_RE.sub(lambda m: f"{m.group(1)}?v={version}", html)
+    # 缓存头交给 NoCacheStaticMiddleware 统一加，避免重复两个 cache-control
+    return Response(content=html, media_type="text/html; charset=utf-8")
 
 
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
