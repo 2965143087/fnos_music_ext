@@ -278,6 +278,24 @@ app_image_fingerprint() {
         --format "{{index .Config.Labels \"${BUILD_FINGERPRINT_LABEL}\"}}" 2>/dev/null || true
 }
 
+repo_version() {
+    head -n 1 "${BASE_DIR}/VERSION" 2>/dev/null | tr -d '[:space:]'
+}
+
+# 镜像里烤进去的部署版本号：与 VERSION 不一致说明镜像没跟上代码。
+# 指纹本该覆盖这点，但实测出现过"VERSION 已是新版、container 仍跑旧镜像"
+# （旧 supervisord 没有 qqmusic 进程 → 选 QQ 必卡在 healthz 超时）。
+app_image_version() {
+    run_docker image inspect "${APP_IMAGE}" \
+        --format '{{index .Config.Labels "io.fnmusic-ext.version"}}' 2>/dev/null || true
+}
+
+# 镜像内是否真有某个 supervisor 程序（拿进程表当"代码是否真的进镜像"的探针）
+image_has_program() {
+    run_docker run --rm --entrypoint /bin/sh "${APP_IMAGE}" \
+        -c "grep -q 'program:$1' /etc/supervisor/supervisord.conf" >/dev/null 2>&1
+}
+
 env_value() {
     # 只读 .env 里单个键的值（供探测后同步 compose 参数），不展开其他键
     [ -f "${BASE_DIR}/.env" ] || return 0
@@ -292,7 +310,11 @@ ensure_image_current() {
     # 应用镜像保障（issue #70）：构建输入未变时复用本地镜像，跳过基础镜像探测与
     # 拉取（python 基础镜像只参与构建，运行的是 fnmusic-sources 镜像）；镜像缺失、
     # 旧镜像无指纹标签或构建输入变化时才探测基础镜像并重建。
-    local fingerprint stored manual_base
+    local fingerprint stored manual_base want_version image_version
+    # 版本号先导出：compose 插值优先读环境变量，指纹与 build.args 必须用同一个值，
+    # 否则「算指纹时用 .env 旧版本、构建时用新版本」会自相矛盾。
+    want_version="$(repo_version)"
+    export FNMUSIC_VERSION="${want_version}"
     manual_base="${BASE_IMAGE:-}"
     fingerprint="$(compute_build_fingerprint)" || {
         log_err "无法计算应用镜像构建指纹。"
@@ -301,9 +323,12 @@ ensure_image_current() {
     stored="$(app_image_fingerprint)"
     # 手动指定的 BASE_IMAGE 与 .env 缓存不同 = 构建输入变化：跳过复用走探测，
     # 让手动引用写入 .env 后重建（与旧版"安装必验证手动引用"的语义一致）
-    if [ "${stored}" = "${fingerprint}" ] \
+    image_version="$(app_image_version)"
+    # 指纹一致但版本标签不一致 = 镜像没跟上部署（旧版安装器 / 标签缺失）：
+    # 必须重建，不能复用，否则运行的是旧代码。
+    if [ "${stored}" = "${fingerprint}" ] && [ "${image_version}" = "${want_version}" ] \
        && { [ -z "${manual_base}" ] || [ "${manual_base}" = "$(env_value FNMUSIC_BASE_IMAGE)" ]; }; then
-        log_info "应用镜像构建输入未变化，复用 ${APP_IMAGE}（跳过基础镜像探测与拉取）。"
+        log_info "应用镜像构建输入未变化且版本一致（${want_version}），复用 ${APP_IMAGE}（跳过基础镜像探测与拉取）。"
         FNMUSIC_BUILD_FINGERPRINT="${fingerprint}" \
             run_docker compose -f "${BASE_DIR}/docker-compose.yml" up -d --no-build --pull never || return 1
         return 0
@@ -323,11 +348,16 @@ ensure_image_current() {
         return 1
     }
     stored="$(app_image_fingerprint)"
-    if [ "${stored}" = "${fingerprint}" ]; then
+    image_version="$(app_image_version)"
+    if [ "${stored}" = "${fingerprint}" ] && [ "${image_version}" = "${want_version}" ]; then
         log_info "基础镜像已就绪且应用镜像匹配最新构建输入，复用 ${APP_IMAGE}（不重建）。"
         FNMUSIC_BUILD_FINGERPRINT="${fingerprint}" \
             run_docker compose -f "${BASE_DIR}/docker-compose.yml" up -d --no-build --pull never || return 1
         return 0
+    fi
+    if [ -n "${image_version}" ] && [ "${image_version}" != "${want_version}" ]; then
+        log_warn "应用镜像版本 ${image_version} 与部署版本 ${want_version} 不一致，删除旧镜像后重建..."
+        run_docker image rm -f "${APP_IMAGE}" >/dev/null 2>&1 || true
     fi
     log_info "应用镜像缺失或构建输入变化，重建 ${APP_IMAGE}..."
     # issue #24：非 tty 下构建进度条会被压成静默（fpk 安装看似"卡在 55%"），默认 plain
@@ -336,8 +366,18 @@ ensure_image_current() {
         run_docker compose -f "${BASE_DIR}/docker-compose.yml" up -d --build || return 1
     stored="$(app_image_fingerprint)"
     if [ "${stored}" != "${fingerprint}" ]; then
-        log_err "新应用镜像的构建指纹缺失或与预期不符。"
+        log_err "新应用镜像的构建指纹缺失或与预期不符（期望 ${fingerprint}，实际 ${stored:-空}）。"
         return 1
+    fi
+    image_version="$(app_image_version)"
+    if [ "${image_version}" != "${want_version}" ]; then
+        log_err "新应用镜像版本标签为 ${image_version:-空}，与部署版本 ${want_version} 不符。"
+        return 1
+    fi
+    # 进程表探针：镜像里应含 qqmusic 程序，否则选 QQ 会等不到 8776 的 healthz。
+    # 只告警不阻断——版本标签已是强校验，这里避免 docker run 受限时误杀安装。
+    if [ -d "${BASE_DIR}/qqmusic-service" ] && ! image_has_program qqmusic; then
+        log_warn "重建后的镜像未检出 qqmusic 进程配置，请检查 container/supervisord.conf 是否进包。"
     fi
 }
 

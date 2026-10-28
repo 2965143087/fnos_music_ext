@@ -2086,8 +2086,11 @@ class NoCacheStaticMiddleware:
             if message["type"] == "http.response.start" and (
                     no_cache_path or _is_html(message)):
                 message = dict(message)
+                # HTML 用 no-store：飞牛桌面 WebView 对 no-cache 仍可能直接复用旧页面，
+                # 升级后就会看到"侧栏版本是新的、菜单还是旧的"。静态资源保留协商缓存。
+                directive = b"no-store, must-revalidate" if _is_html(message) else b"no-cache"
                 message["headers"] = list(message.get("headers", [])) + [
-                    [b"cache-control", b"no-cache"],
+                    [b"cache-control", directive],
                 ]
             await send(message)
 

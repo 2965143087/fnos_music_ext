@@ -1986,11 +1986,16 @@ def test_about_requires_admin(about_env):
 
 
 def test_html_and_static_served_with_no_cache(about_env):
-    """升级后 WebView 不得沿用旧页面：HTML/静态资源必须带 no-cache（协商缓存）。"""
+    """升级后 WebView 不得沿用旧页面。
+
+    HTML 必须 no-store：飞牛桌面 WebView 对 no-cache 仍可能直接复用旧页面
+    （实测升级后侧栏版本变了、菜单还是旧的三音源）。静态资源保留协商缓存。
+    """
     (about_env / "static" / "app.js").write_text("// js", encoding="utf-8")
     (about_env / "static" / "index.html").write_text("<html></html>", encoding="utf-8")
     with TestClient(webui.app) as client:
-        assert client.get("/").headers["cache-control"] == "no-cache"
+        html_cache = client.get("/").headers["cache-control"]
+        assert "no-store" in html_cache, html_cache
         assert client.get("/static/app.js").headers["cache-control"] == "no-cache"
         # 接口响应不受影响（本来就是动态的）
         r = client.get("/api/about")

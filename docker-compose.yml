@@ -22,6 +22,7 @@ services:
         - "io.fnmusic-ext.build-fingerprint=${FNMUSIC_BUILD_FINGERPRINT:-}"
       args:
         BASE_IMAGE: ${FNMUSIC_BASE_IMAGE:-python:3.13-slim}
+        FNMUSIC_VERSION: ${FNMUSIC_VERSION:-0}
         PIP_INDEX_URL: ${FNMUSIC_PIP_INDEX:-https://mirrors.tencent.com/pypi/simple/}
         APT_MIRROR: ${FNMUSIC_APT_MIRROR:-https://mirrors.tencent.com}
     image: fnmusic-sources:latest
@@ -35,6 +36,9 @@ services:
     volumes:
       - ./sources-data:/data
       - .:/repo
+      # 前端从部署目录挂载：静态页原本烤在镜像里，一旦镜像因故未重建，就会出现
+      # "VERSION 已是新版、管理页还是三音源"。挂载后页面永远跟随当前代码。
+      - ./webui-service/static:/srv/webui-service/static:ro
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "/usr/local/bin/healthcheck.sh"]

@@ -4,6 +4,11 @@ ARG BASE_IMAGE=python:3.13-slim
 FROM ${BASE_IMAGE}
 
 ARG PIP_INDEX_URL=https://mirrors.tencent.com/pypi/simple/
+# 部署版本号：写进镜像标签，安装时与 VERSION 比对——不一致就说明镜像没跟上代码，
+# 必须重建（否则会出现"版本号是新的、进程表/页面还是旧的"）。
+ARG FNMUSIC_VERSION=0
+LABEL io.fnmusic-ext.version="${FNMUSIC_VERSION}" \
+      io.fnmusic-ext.role="fnmusic-sources"
 ARG APT_MIRROR="https://mirrors.tencent.com"
 
 ENV PYTHONUNBUFFERED=1 \

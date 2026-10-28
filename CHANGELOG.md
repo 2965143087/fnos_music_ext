@@ -5,6 +5,34 @@
 
 ## [Unreleased]
 
+## [2.11.4] - 2026-10-28
+
+### 修复
+- 修复「2.11.3 侧栏显示新版本、管理页仍是三音源，选 QQ 安装必失败」：根因是**容器仍在跑旧镜像**。
+  旧镜像里的 `supervisord.conf` 没有 qqmusic 进程、`app.py` 也没有"读部署目录"的逻辑，
+  所以 8776 永远等不到 healthz；而 `VERSION` 是运行时从挂载目录读的，于是版本新、功能旧。
+  - `Dockerfile` / `docker-compose.yml`：镜像写入 `io.fnmusic-ext.version` 标签，版本作为 build arg 传入。
+  - `proxy/install_common.sh`：镜像复用改为**指纹 + 版本双条件**；版本不一致时先 `docker image rm` 再重建
+    （避免 COPY 层沿用旧内容），构建后校验版本标签，不符即明确报错（不再"静默复用旧镜像"）。
+  - `docker-compose.yml`：把 `webui-service/static` 挂载进容器，前端永远跟随部署目录，
+    即使镜像因故未重建也不会出现"版本新、页面旧"。
+  - 管理页 HTML 缓存改为 `no-store, must-revalidate`：飞牛桌面 WebView 对 `no-cache` 仍可能复用旧页面。
+- 新增契约测试：镜像版本标签 / compose 版本参数 / 前端挂载 / 复用双条件，缺一条即失败。
+
+## [2.11.4] - 2026-10-28
+
+### 修复
+- 修复「2.11.3 侧栏显示新版本、管理页仍是三音源，选 QQ 安装必失败」：根因是**容器仍在跑旧镜像**。
+  旧镜像里的 `supervisord.conf` 没有 qqmusic 进程、`app.py` 也没有"读部署目录"的逻辑，
+  所以 8776 永远等不到 healthz；而 `VERSION` 是运行时从挂载目录读的，于是版本新、功能旧。
+  - `Dockerfile` / `docker-compose.yml`：镜像写入 `io.fnmusic-ext.version` 标签，版本作为 build arg 传入。
+  - `proxy/install_common.sh`：镜像复用改为**指纹 + 版本双条件**；版本不一致时先 `docker image rm` 再重建
+    （避免 COPY 层沿用旧内容），构建后校验版本标签，不符即明确报错（不再"静默复用旧镜像"）。
+  - `docker-compose.yml`：把 `webui-service/static` 挂载进容器，前端永远跟随部署目录，
+    即使镜像因故未重建也不会出现"版本新、页面旧"。
+  - 管理页 HTML 缓存改为 `no-store, must-revalidate`：飞牛桌面 WebView 对 `no-cache` 仍可能复用旧页面。
+- 新增契约测试：镜像版本标签 / compose 版本参数 / 前端挂载 / 复用双条件，缺一条即失败。
+
 ## [2.11.3] - 2026-10-28
 
 ### 修复

@@ -243,3 +243,30 @@ def test_container_and_native_start_qqmusic():
     native = (BASE / "container" / "supervisord-native.conf.in").read_text(encoding="utf-8")
     assert "[program:qqmusic]" in native
     assert 'FNMUSIC_QQ_DATA_DIR="@DATA@/qqmusic"' in native
+
+
+def test_image_version_gate_and_static_mount():
+    """2.11.3 事故：VERSION 已是新版、容器仍跑旧镜像（无 qqmusic 进程、页面三音源）。
+
+    修法有三道保险，缺一条就会重现：
+    1) Dockerfile 把版本写进镜像标签；
+    2) compose 把版本作为 build arg 传入，并把前端目录挂载进容器；
+    3) ensure_image_current 用「指纹 + 版本」双条件判复用，不一致先删镜像再重建。
+    """
+    dockerfile = (BASE / "container" / "Dockerfile").read_text(encoding="utf-8")
+    assert "ARG FNMUSIC_VERSION" in dockerfile
+    assert 'io.fnmusic-ext.version="${FNMUSIC_VERSION}"' in dockerfile
+
+    compose = (BASE / "docker-compose.yml").read_text(encoding="utf-8")
+    assert "FNMUSIC_VERSION: ${FNMUSIC_VERSION:-0}" in compose
+    assert "./webui-service/static:/srv/webui-service/static:ro" in compose
+
+    common = (BASE / "proxy" / "install_common.sh").read_text(encoding="utf-8")
+    # 版本探测 + 复用双条件
+    assert 'io.fnmusic-ext.version' in common
+    assert 'export FNMUSIC_VERSION="${want_version}"' in common
+    assert '[ "${image_version}" = "${want_version}" ]' in common
+    # 版本不一致要先删镜像，否则 COPY 层可能沿用旧内容
+    assert 'run_docker image rm -f "${APP_IMAGE}"' in common
+    # 构建后必须校验版本标签
+    assert '与部署版本 ${want_version} 不符' in common
