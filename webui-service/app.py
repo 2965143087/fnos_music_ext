@@ -25,6 +25,7 @@ import time
 import zipfile
 from contextlib import asynccontextmanager
 from pathlib import Path
+from urllib.parse import quote
 
 import anyio
 import httpx
@@ -1982,7 +1983,17 @@ async def api_logs_export():
 
 @app.get("/")
 async def index():
-    return FileResponse(STATIC_DIR / "index.html")
+    # 静态资源 URL 带上版本号：升级后 URL 变化，浏览器 / 飞牛桌面 WebView 必定重新拉取。
+    # 否则会停在「接口是新版、页面还是旧版」的错配上——表现为侧栏版本号已是 2.12.0，
+    # 音乐源页却仍显示已删除的 musicdl 卡片、看不到 QQ 音乐入口，健康列表出现 undefined。
+    try:
+        html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
+    except OSError:
+        return FileResponse(STATIC_DIR / "index.html")
+    stamp = quote(_read_version(), safe="")
+    for asset in ("theme-boot.js", "style.css", "app.js"):
+        html = html.replace(f"static/{asset}\"", f"static/{asset}?v={stamp}\"")
+    return Response(content=html, media_type="text/html")
 
 
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
