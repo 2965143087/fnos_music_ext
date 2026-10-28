@@ -119,9 +119,9 @@ def test_cmd_and_wizard(built):
     options = []
     for item in steps[0]["items"]:
         if item.get("field") == "wizard_sources":
-            assert item["label"] == "初始音源（四选一）"
+            assert item["label"] == "初始音源（三选一）"
             options = [o["value"] for o in item["options"]]
-    assert options == ["musicdl", "musicbox", "lxmusic", "qqmusic"]
+    assert options == ["musicbox", "musicdl", "lxmusic"]  # QQ 占用 musicbox 槽位
 
 
 def test_sha256_sidecar(built):
@@ -130,3 +130,20 @@ def test_sha256_sidecar(built):
     assert sidecar.is_file()
     expected = hashlib.sha256(fpk.read_bytes()).hexdigest()
     assert expected in sidecar.read_text(encoding="utf-8")
+
+
+def test_desktop_url_carries_version_for_cache_busting(built):
+    """桌面入口 URL 必须带 ?v=<版本>。
+
+    飞牛桌面用 iframe 加载管理页，URL 固定时会长期复用旧页面——实测升级到
+    2.11.5 后页面仍是网易云三音源。加版本号让每次升级换地址。
+    """
+    import io
+    import json
+
+    fpk, unpacked, names = built
+    version = (REPO_ROOT / "VERSION").read_text(encoding="utf-8").strip()
+    with tarfile.open(unpacked / "app.tgz", "r:gz") as tar:
+        cfg = json.loads(tar.extractfile("ui/config").read().decode("utf-8"))
+    url = cfg[".url"]["fnmusic-ext.main"]["url"]
+    assert url.endswith(f"?v={version}"), url

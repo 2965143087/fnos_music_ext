@@ -30,6 +30,7 @@ import argparse
 import fnmatch
 import gzip
 import hashlib
+import json
 import io
 import os
 import shutil
@@ -186,6 +187,20 @@ def stage_app(repo_root: Path, stage: Path) -> int:
         else:
             dest.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(item, dest)
+
+    # 桌面入口 URL 带版本号：飞牛桌面用 iframe 加载管理页，URL 不变时会长期复用
+    # 旧页面（实测：后端已是 2.11.5，页面还是网易云三音源）。加 ?v= 让每次升级
+    # 都换一个地址，缓存自然失效。
+    version = (repo_root / "VERSION").read_text(encoding="utf-8").strip() or "0"
+    ui_config = ui_dir / "config"
+    if ui_config.is_file():
+        data = json.loads(ui_config.read_text(encoding="utf-8"))
+        for entry in (data.get(".url") or {}).values():
+            base = str(entry.get("url") or "")
+            if base and "?" not in base:
+                entry["url"] = f"{base}?v={version}"
+        ui_config.write_text(json.dumps(data, ensure_ascii=False, indent=4) + "\n",
+                             encoding="utf-8", newline="\n")
     return count
 
 

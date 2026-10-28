@@ -1710,16 +1710,34 @@ async def netease_auth_proxy(path: str, request: Request):
 
 
 @app.get("/api/netease/qr")
-async def netease_qr(unikey: str = Query(...)):
-    """把登录链接渲染为 SVG 二维码（无 PIL 依赖，前端直接 <img> 展示）。"""
+async def netease_qr(request: Request, unikey: str = Query(...)):
+    """二维码转发：musicbox 槽位现在是 QQ 音乐，直接回它自己的官方二维码。
+
+    保留这个路径是因为飞牛桌面的 iframe 会长期缓存旧页面（URL 固定），
+    旧前端仍会调 /api/netease/qr。若这里还按网易链接出码，用户会看到
+    二维码指向 music.163.com——已实测出现过。改为透传槽位二维码，
+    旧页面也能扫出 QQ 登录。
+    """
     if not unikey.strip():
         raise HTTPException(status_code=400, detail="unikey cannot be empty")
+    try:
+        resp = await get_http(request).get(
+            f"{CONF['musicbox_url']}/api/v1/auth/login/qr.png",
+            params={"unikey": unikey.strip()},
+            timeout=30.0,
+        )
+    except httpx.HTTPError:
+        resp = None  # 槽位暂时不可达：退回下面的 SVG 兜底，不要 502 打断扫码
+    if resp is not None and resp.status_code == 200 and resp.content:
+        return Response(content=resp.content, media_type="image/png",
+                        headers={"Cache-Control": "no-store"})
+    # 槽位不支持图片出码时，退回 SVG 渲染（保持旧行为，至少不 500）
     try:
         import qrcode
         import qrcode.image.svg
     except ImportError as exc:
         raise HTTPException(status_code=501, detail="qrcode not installed") from exc
-    url = f"https://music.163.com/login?codekey={unikey.strip()}"
+    url = f"{CONF['musicbox_url']}"
     img = qrcode.make(url, image_factory=qrcode.image.svg.SvgPathImage, box_size=12)
     buf = io.BytesIO()
     img.save(buf)
