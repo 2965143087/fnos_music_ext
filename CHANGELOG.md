@@ -25,6 +25,13 @@
     缺失时才联网，并把重试提到 `--retries 10 --timeout 120`。
 - 删除 musicdl 后镜像构建不再需要 `curl_cffi` / `pycryptodomex` / `protobuf` 等重型依赖，
   镜像体积与构建耗时同步下降。
+- 移除 musicdl 后残留的三处会导致安装直接失败的路径：
+  - `ensure_sources_native.sh` 仍在校验已删除的 `musicdl-service/requirements.txt`（缺文件即 `exit 1`），
+    且导入校验清单里仍要求 `musicdl` 可导入；依赖指纹版本升到 `sources-20261028-1` 使旧缓存失效。
+  - `extend.sh` 的 `FNMUSIC_MUSICDL_ENABLED` 默认值是 `true`，旧 `.env` 遗留 `true` 时
+    `ENABLE_MUSICDL=1`，`wait_source` 等 90 秒后 `exit 1`。现改为恒禁用，忽略旧开关。
+  - `install.sh` 的 `ENV_EXPLICIT` 会在升级时沿用旧 `.env` 的 musicdl 开关；已移出该列表，
+    并不再写入 `FNMUSIC_MUSICDL_URL`。
 
 ## [2.11.0] - 2026-10-28
 
