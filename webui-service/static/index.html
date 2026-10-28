@@ -72,11 +72,6 @@
             <div class="provider-head">QQ 音乐</div>
             <div class="provider-desc">QQ 扫码登录；未登录仅 128k，登录后按账号权益取 320k/无损</div>
           </label>
-          <label class="provider-card" data-provider="musicdl">
-            <input type="radio" name="provider" value="musicdl">
-            <div class="provider-head">musicdl 聚合音源</div>
-            <div class="provider-desc">免登录多平台聚合，自选启用平台</div>
-          </label>
           <label class="provider-card" data-provider="lxmusic">
             <input type="radio" name="provider" value="lxmusic">
             <div class="provider-head">洛雪自定义源</div>
@@ -119,19 +114,6 @@
               <button class="btn" id="qq-logout-btn">退出登录</button>
               <span id="qq-qr-check" class="muted"></span>
             </div>
-          </div>
-        </div>
-
-        <!-- musicdl：平台多选 -->
-        <div class="subpanel" id="panel-musicdl" hidden>
-          <div class="card">
-            <div class="card-title">启用平台（多选）</div>
-            <div class="btn-row">
-              <input class="input grow" id="platform-search" placeholder="搜索平台…">
-              <button class="btn" id="platform-reload">刷新列表</button>
-            </div>
-            <div id="platform-list" class="chip-grid pad"></div>
-            <p class="hint" id="platform-note"></p>
           </div>
         </div>
 
@@ -190,7 +172,7 @@
           <div class="card-title">推荐</div>
           <label class="switch-row"><span>热门榜单推荐<div class="sub">独立「热门推荐」歌单：热歌榜/飙升榜原味</div></span><input type="checkbox" id="recommend-hot"></label>
           <label class="switch-row"><span>每日推荐<div class="sub">独立「每日推荐」歌单；其他音源在配置大模型后生效</div></span><input type="checkbox" id="recommend-daily"></label>
-          <label class="switch-row"><span>公共歌单<div class="sub">浏览并勾选网易/洛雪的原生推荐、分类歌单和榜单；勾选后作为独立只读歌单显示。musicdl 没有统一的推荐歌单发现接口。</div></span><input type="checkbox" id="public-playlists-enabled"></label>
+          <label class="switch-row"><span>公共歌单<div class="sub">浏览并勾选网易/洛雪的原生推荐、分类歌单和榜单；勾选后作为独立只读歌单显示。</div></span><input type="checkbox" id="public-playlists-enabled"></label>
           <div id="public-playlists-browser" class="stack" hidden>
             <div class="btn-row">
               <select class="input" id="public-provider" aria-label="歌单音源"></select>
@@ -227,7 +209,7 @@
       <section class="page" id="page-search">
         <h2>搜索</h2>
         <div class="card">
-          <label class="switch-row"><span>搜索深分页<div class="sub">搜索结果翻页时，若在线歌曲不够填满一页，自动向音源继续取下一页补齐（本地歌曲始终排在最前）；musicdl 音源不支持分页，仅参与首屏。关闭后在线结果只显示首次搜索拿到的部分。</div></span><input type="checkbox" id="search-deep"></label>
+          <label class="switch-row"><span>搜索深分页<div class="sub">搜索结果翻页时，若在线歌曲不够填满一页，自动向音源继续取下一页补齐（本地歌曲始终排在最前）。关闭后在线结果只显示首次搜索拿到的部分。</div></span><input type="checkbox" id="search-deep"></label>
         </div>
         <div class="card">
           <label class="field"><span>搜索超时时间</span>

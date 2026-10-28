@@ -9,8 +9,8 @@ SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 SOURCES="${wizard_sources:-}"
 case "${SOURCES}" in
-    musicdl|musicbox|lxmusic|qqmusic) ;;
-    *) SOURCES="musicdl" ;;
+    musicbox|lxmusic|qqmusic) ;;
+    *) SOURCES="qqmusic" ;;
 esac
 
 EXTEND="${wizard_extend:-true}"

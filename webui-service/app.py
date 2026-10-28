@@ -97,7 +97,6 @@ _update_cache: dict = {}
 
 # 音源进程 ↔ 启用开关（三选一互斥）
 PROVIDERS = {
-    "musicdl": "FNMUSIC_MUSICDL_ENABLED",
     "musicbox": "FNMUSIC_NETEASE_ENABLED",
     "qqmusic": "FNMUSIC_QQMUSIC_ENABLED",
     "lxmusic": "FNMUSIC_LX_ENABLED",
@@ -106,14 +105,11 @@ PROVIDERS = {
 # WebUI 可管理的配置键与元数据（kind/default/reload 驱动前端渲染与校验）。
 # reload: hot=proxy 热重载即生效；process=需要切换/重启对应音源进程。
 SCHEMA: dict[str, dict] = {
-    "FNMUSIC_MUSICDL_ENABLED": {"kind": "bool", "default": "false", "group": "provider", "reload": "process", "label": "musicdl 聚合音源"},
     "FNMUSIC_NETEASE_ENABLED": {"kind": "bool", "default": "false", "group": "provider", "reload": "process", "label": "网易云音乐盒子"},
     "FNMUSIC_QQMUSIC_ENABLED": {"kind": "bool", "default": "false", "group": "provider", "reload": "process", "label": "QQ 音乐"},
     "FNMUSIC_QQMUSIC_QUALITY": {"kind": "enum", "values": ["lossless", "exhigh", "standard"], "default": "lossless", "group": "qqmusic", "reload": "hot", "label": "QQ 音乐首选音质"},
     "FNMUSIC_QQMUSIC_SEARCH_LIMIT": {"kind": "int", "min": 1, "max": 100, "default": "50", "group": "qqmusic", "reload": "hot", "label": "QQ 音乐搜索条数"},
     "FNMUSIC_LX_ENABLED": {"kind": "bool", "default": "false", "group": "provider", "reload": "process", "label": "洛雪自定义源"},
-    "FNMUSIC_ONLINE_SOURCES": {"kind": "csv", "default": "", "group": "musicdl", "reload": "process", "label": "musicdl 启用平台"},
-    "MUSICDL_SOURCES": {"kind": "csv", "default": "", "group": "musicdl", "reload": "process", "label": "musicdl 服务白名单（联动）"},
     "LX_SOURCE_URL": {"kind": "str", "default": "", "group": "lx", "reload": "process", "label": "洛雪源脚本地址（http(s) URL 或 file:// 上传地址）"},
     "LX_SOURCE_LIST": {"kind": "str", "default": "[]", "group": "lx", "reload": "hot", "label": "洛雪源列表（JSON 数组）"},
     "LX_SOURCES": {"kind": "csv", "default": "kg,wy,mg,kw", "group": "lx", "reload": "hot", "label": "lx 平台（按源声明推导）"},
@@ -234,12 +230,12 @@ def supervisor_status(*, timeout: float = 20.0) -> dict[str, dict]:
 
 
 PROVIDER_PROGRAMS = {
-    "musicdl": ["musicdl"],
     "musicbox": ["musicbox"],
+    "qqmusic": ["qqmusic"],
     "lxmusic": ["lxserver", "lxmusic"],
 }
-PROVIDER_PROGRAM = {"musicdl": "musicdl", "musicbox": "musicbox", "qqmusic": "qqmusic", "lxmusic": "lxmusic"}  # 兼容单名引用
-PROVIDER_HEALTH = {"musicdl": CONF["musicdl_url"], "musicbox": CONF["musicbox_url"],
+PROVIDER_PROGRAM = {"musicbox": "musicbox", "qqmusic": "qqmusic", "lxmusic": "lxmusic"}  # 兼容单名引用
+PROVIDER_HEALTH = {"musicbox": CONF["musicbox_url"],
                    "qqmusic": CONF["qqmusic_url"], "lxmusic": CONF["lx_url"]}
 
 

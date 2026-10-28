@@ -47,3 +47,6 @@ dist/
 packaging/fpk/.build/
 
 .cursor/
+
+# 预置离线 wheel（随 fpk 分发，不进版本库）
+container/wheels/*.whl

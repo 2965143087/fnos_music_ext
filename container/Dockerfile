@@ -1,4 +1,4 @@
-# fnmusic-sources 统一镜像：musicdl + musicbox + lxmusic + webui 四进程（supervisor 管理，按需启动）
+# fnmusic-sources 统一镜像：musicbox（网易云/QQ 槽位）+ lxmusic + webui 三进程（supervisor 管理，按需启动）
 # 基础镜像引用可由 build args 覆盖（默认官方源；国内网络自动回退见根目录 ensure_base_image.sh）
 ARG BASE_IMAGE=python:3.13-slim
 FROM ${BASE_IMAGE}
@@ -19,7 +19,7 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /srv
 
-# nodejs（洛雪自定义源 Node 沙箱，trixie 自带 20.x）/ ffmpeg（musicdl 转封装）/ supervisor
+# nodejs（洛雪自定义源 Node 沙箱，trixie 自带 20.x）/ ffmpeg（代理侧转封装兜底）/ supervisor
 # apt 源默认国内镜像（与 pip 同策略，APT_MIRROR 可覆盖），仅在本构建层内临时替换。
 # 构建容器无法复用"指向本机"的宿主 DNS（Docker 会剔除 127.x 并回退 8.8.8.8，国内不可达），
 # 因此不探测、始终把国内可达的公共 DNS 写到最前（写入失败不中断）；apt-get update
@@ -62,12 +62,15 @@ RUN set -eu; \
     if [ -n "${APT_MIRROR}" ]; then swap_apt_host "${APT_MIRROR}" 'http://deb.debian.org'; fi; \
     rm -rf /var/lib/apt/lists/*
 
-# 四个服务的 Python 依赖并集（各自 requirements 独立演进，镜像统一安装）
-# 构建容器 DNS 失败自愈同 apt 步骤（resolv.conf 改写不跨 RUN 层持久，需每步自带）；
-# 镜像源安装失败自动回退官方 PyPI 重试
-COPY musicdl-service/requirements.txt /srv/req.musicdl
+# 预置离线 wheel（可选）：container/wheels/ 内的 .whl 会被 pip 优先使用，命中时整层不联网。
+# 目录缺失或 wheel 版本不满足 requirements 时自动回退在线安装，不影响正常构建。
+COPY container/wheels/ /srv/wheels/
+
+# ── 上游三份依赖：与上游 2.10.x 保持完全一致的 COPY 顺序与 RUN 命令 ────────────
+# 这是「安装不再等十几分钟」的关键：从上游版本升级时，只要这三条 COPY 与下面的
+# RUN 命令一字未变，Docker 会直接命中已有的层缓存，整段联网安装被跳过。
+# 因此任何新增音源的依赖都不得并入这一层，必须另起一层追加（见下方 QQ 音乐）。
 COPY musicbox-service/requirements.txt /srv/req.musicbox
-COPY qqmusic-service/requirements.txt /srv/req.qqmusic
 COPY lxmusic-service/requirements.txt /srv/req.lxmusic
 COPY webui-service/requirements.txt /srv/req.webui
 RUN set -eu; \
@@ -79,11 +82,33 @@ RUN set -eu; \
         cat /tmp/resolv.fnmusic > /etc/resolv.conf 2>/dev/null || true; \
     }; \
     fix_dns; \
-    pip install --no-cache-dir -r /srv/req.musicdl -r /srv/req.musicbox -r /srv/req.qqmusic -r /srv/req.lxmusic -r /srv/req.webui \
+    pip install --no-cache-dir --find-links=/srv/wheels --retries 10 --timeout 120 \
+        -r /srv/req.musicbox -r /srv/req.lxmusic -r /srv/req.webui \
     || { echo "[WARN] pip 镜像源（${PIP_INDEX_URL}）安装失败，回退官方 PyPI 重试..." >&2; \
-         pip install --no-cache-dir -i https://pypi.org/simple \
-            -r /srv/req.musicdl -r /srv/req.musicbox -r /srv/req.qqmusic -r /srv/req.lxmusic -r /srv/req.webui; } \
-    && rm -f /srv/req.*
+         pip install --no-cache-dir --find-links=/srv/wheels --retries 10 --timeout 120 \
+            -i https://pypi.org/simple \
+            -r /srv/req.musicbox -r /srv/req.lxmusic -r /srv/req.webui; } \
+    && rm -f /srv/req.musicbox /srv/req.lxmusic /srv/req.webui
+
+# ── QQ 音乐依赖：单独一层 ──────────────────────────────────────────────────────
+# QQ 是本版本新增音源，这一层必然重建；独立成层后它的重建不会波及上面可复用的
+# 上游依赖层。预置 wheel 齐全时本层完全离线（实测 28 个 wheel / 试装约 40 秒）。
+COPY qqmusic-service/requirements.txt /srv/req.qqmusic
+RUN set -eu; \
+    fix_dns() { \
+        { \
+            printf 'nameserver 223.5.5.5\nnameserver 119.29.29.29\n'; \
+            grep -vE '^[[:space:]]*nameserver[[:space:]]+(127\.|::1|localhost)' /etc/resolv.conf 2>/dev/null || true; \
+        } > /tmp/resolv.fnmusic 2>/dev/null || true; \
+        cat /tmp/resolv.fnmusic > /etc/resolv.conf 2>/dev/null || true; \
+    }; \
+    fix_dns; \
+    pip install --no-cache-dir --find-links=/srv/wheels --retries 10 --timeout 120 \
+        -r /srv/req.qqmusic \
+    || { echo "[WARN] pip 镜像源（${PIP_INDEX_URL}）安装失败，回退官方 PyPI 重试..." >&2; \
+         pip install --no-cache-dir --find-links=/srv/wheels --retries 10 --timeout 120 \
+            -i https://pypi.org/simple -r /srv/req.qqmusic; } \
+    && rm -f /srv/req.qqmusic
 
 RUN groupadd -g 1000 appuser \
     && useradd -m -u 1000 -g 1000 appuser \
@@ -150,7 +175,6 @@ RUN set -eu; \
     chown -R appuser:appuser /srv/lxserver
 
 # --chown+chmod：镜像权限不依赖构建上下文的 umask/属主
-COPY --chown=appuser:appuser musicdl-service/app.py musicdl-service/hardening.py musicdl-service/search_core.py musicdl-service/worker.py /srv/musicdl-service/
 COPY --chown=appuser:appuser musicbox-service/app.py musicbox-service/runner.py musicbox-service/netease_ext.py musicbox-service/playback.py /srv/musicbox-service/
 COPY --chown=appuser:appuser qqmusic-service/app.py qqmusic-service/qqmusic_ext.py /srv/qqmusic-service/
 COPY --chown=appuser:appuser lxmusic-service/app.py lxmusic-service/lxserver_client.py lxmusic-service/verify_source.py /srv/lxmusic-service/

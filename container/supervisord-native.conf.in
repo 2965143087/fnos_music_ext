@@ -27,19 +27,6 @@ supervisor.rpcinterface_factory = supervisor.rpcinterface:make_main_rpcinterface
 [supervisorctl]
 serverurl=unix://@RUN@/supervisor.sock
 
-[program:musicdl]
-directory=@REPO@/musicdl-service
-command="@VENV@/bin/uvicorn" app:app --host 127.0.0.1 --port 8768
-autostart=false
-autorestart=true
-startretries=5
-stopsignal=TERM
-stopasgroup=true
-killasgroup=true
-stdout_logfile=@RUN@/musicdl.log
-stdout_logfile_maxbytes=0
-redirect_stderr=true
-
 [program:musicbox]
 directory=@REPO@/musicbox-service
 command="@VENV@/bin/uvicorn" app:app --host 127.0.0.1 --port 8770

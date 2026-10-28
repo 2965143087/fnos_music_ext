@@ -8,7 +8,7 @@ const APP_BASE = "/app/fnmusic-ext";
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => Array.from(document.querySelectorAll(sel));
 
-const PROVIDER_LABEL = { musicdl: "musicdl 聚合音源", musicbox: "网易云音乐盒子", qqmusic: "QQ 音乐", lxmusic: "洛雪自定义源", none: "未配置" };
+const PROVIDER_LABEL = { musicbox: "网易云音乐盒子", qqmusic: "QQ 音乐", lxmusic: "洛雪自定义源", none: "未配置" };
 const PROC_LABEL = { musicdl: "musicdl", musicbox: "musicbox", qqmusic: "qqmusic", lxserver: "lxserver", lxmusic: "lxmusic", webui: "WebUI" };
 
 let configValues = {};   // GET /api/config 的 values
@@ -273,7 +273,6 @@ function applyConfigToForm() {
   const v = configValues;
   const provider = v.FNMUSIC_NETEASE_ENABLED === "true" ? "musicbox"
     : v.FNMUSIC_QQMUSIC_ENABLED === "true" ? "qqmusic"
-    : v.FNMUSIC_MUSICDL_ENABLED === "true" ? "musicdl"
     : v.FNMUSIC_LX_ENABLED === "true" ? "lxmusic" : "";
   $$("input[name=provider]").forEach((el) => { el.checked = el.value === provider; });
   syncProviderPanels(provider);
@@ -405,10 +404,6 @@ function collectConfig() {
   if (dlDir && cacheDir && (dlDir === cacheDir || dlDir.startsWith(cacheDir + "/") || cacheDir.startsWith(dlDir + "/"))) {
     throw new Error("歌曲缓存目录与下载目录不能相同或互为父子目录");
   }
-  if (provider === "musicdl") {
-    values.FNMUSIC_ONLINE_SOURCES = platforms.enabled.join(",");
-    values.MUSICDL_SOURCES = platforms.enabled.join(",");
-  }
   if (provider === "lxmusic") {
     let savedAllInactive = false;
     try {
@@ -495,7 +490,6 @@ $("#save-btn").addEventListener("click", saveConfig);
 function savedProvider() {
   const v = configValues;
   return v.FNMUSIC_NETEASE_ENABLED === "true" ? "musicbox"
-    : v.FNMUSIC_MUSICDL_ENABLED === "true" ? "musicdl"
     : v.FNMUSIC_LX_ENABLED === "true" ? "lxmusic" : "";
 }
 
@@ -519,7 +513,6 @@ function syncProviderPanels(provider) {
   $$(".provider-card").forEach((el) => el.classList.toggle("selected", el.dataset.provider === provider));
   $("#panel-musicbox").hidden = provider !== "musicbox";
   $("#panel-qqmusic").hidden = provider !== "qqmusic";
-  $("#panel-musicdl").hidden = provider !== "musicdl";
   $("#panel-lxmusic").hidden = provider !== "lxmusic";
 }
 $$("input[name=provider]").forEach((el) =>
@@ -528,59 +521,10 @@ $$("input[name=provider]").forEach((el) =>
     if (el.value === "musicbox") syncNeteaseAccount();
     markDirty("音源切换需保存后生效");
     if (el.value && el.value !== savedProvider() && await startPreview(el.value)) {
-      if (el.value === "musicdl") await loadPlatforms(false);
     }
   }));
 
-/* -------------------------------------------------------------- musicdl 平台 */
-function setPlatformFallback() {
-  platforms = { enabled: (configValues.FNMUSIC_ONLINE_SOURCES || "").split(",").filter(Boolean), registered: [] };
-  $("#platform-note").textContent = "musicdl 进程未运行，暂无法获取平台列表（点选 musicdl 音源可临时启动预览）";
-  renderPlatformChips();
-}
 
-async function fetchPlatforms() {
-  const data = await api("/api/platforms");
-  platforms = { enabled: data.enabled || [], registered: data.registered || [] };
-  $("#platform-note").textContent = `共 ${platforms.registered.length} 个注册平台，已启用 ${platforms.enabled.length} 个`;
-  renderPlatformChips();
-}
-
-async function loadPlatforms(autoPreview = true) {
-  try {
-    await fetchPlatforms();
-  } catch (_) {
-    // 进程未运行：autoPreview（用户点选/刷新触发）时临时拉起后重试；页面加载不自动拉起
-    if (!autoPreview) { setPlatformFallback(); return; }
-    try {
-      if (await startPreview("musicdl")) await fetchPlatforms();
-      else setPlatformFallback();
-    } catch (_) {
-      setPlatformFallback();
-    }
-  }
-}
-
-function renderPlatformChips() {
-  const keyword = $("#platform-search").value.trim().toLowerCase();
-  const container = $("#platform-list");
-  const enabledSet = new Set(platforms.enabled);
-  const items = platforms.registered.filter((p) => !keyword || p.toLowerCase().includes(keyword));
-  container.innerHTML = items.length
-    ? items.map((p) => `<span class="chip ${enabledSet.has(p) ? "on" : ""}" data-platform="${p}">${p}</span>`).join("")
-    : `<span class="muted">无匹配平台</span>`;
-  container.querySelectorAll(".chip[data-platform]").forEach((chip) =>
-    chip.addEventListener("click", () => {
-      const p = chip.dataset.platform;
-      const set = new Set(platforms.enabled);
-      if (set.has(p)) { set.delete(p); chip.classList.remove("on"); }
-      else { set.add(p); chip.classList.add("on"); }
-      platforms.enabled = Array.from(set);
-      markDirty("musicdl 平台已修改");
-    }));
-}
-$("#platform-search").addEventListener("input", renderPlatformChips);
-$("#platform-reload").addEventListener("click", loadPlatforms);
 
 /* -------------------------------------------------------------- 公共歌单 */
 const PUBLIC_PROVIDER_OPTIONS = [
@@ -1127,7 +1071,6 @@ async function showPublicBrowser() {
   const saved = savedProvider();
   publicState.provider = currentUiProvider() === "lxmusic" ? "lxmusic" : "musicbox";
   const seq = await reloadPublicBrowser(true);
-  if (seq === publicState.seq && saved === "musicdl") $("#public-note").textContent = "当前音源是 musicdl：它没有统一推荐歌单接口；可浏览网易/洛雪，保存后按常驻规则展示网易公共歌单。";
 }
 
 $("#public-playlists-enabled").addEventListener("change", async () => {

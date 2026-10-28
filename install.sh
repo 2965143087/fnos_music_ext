@@ -7,9 +7,7 @@ set -euo pipefail
 #   supervisor 管理四个程序，只启动当前所选音源（切源秒级，不重建容器）
 # - 音源三选一（互斥单选，可随时在 WebUI 里切换）：
 #     1 musicbox https://github.com/darknessomi/musicbox  (:8770 网易云，推荐扫码登录)
-#     2 musicdl  https://github.com/CharlesPikachu/musicdl (:8768 聚合, 可选平台)
 #     3 lxmusic  洛雪音乐自定义源（用户自带源 URL 解析播放）
-#   musicdl 平台粒度: --sources musicdl-kuwo,musicdl-migu 或全局编号 --sources 2,4
 #   （全部平台编号见 musicdl-service/PLATFORMS.md）
 # - 管理 Web UI（可选，端口 8774，仅本机；经飞牛登录的管理员打开）：
 #   源切换 / 平台选择 / 扫码登录 / 音质模式 / 边听边存 / LLM 配置
@@ -18,11 +16,10 @@ set -euo pipefail
 # - 不修改飞牛 nginx / 官方二进制 / 官方数据库写入
 # 用法:
 #   ./install.sh                                        # 交互
-#   ./install.sh --sources musicdl --sources=2,4 形式同下
 #   ./install.sh --sources musicbox
 #   ./install.sh --sources lxmusic --lx-source-url 'https://example.com/lx.js'
 #   ./install.sh --sources lxmusic --lx-source-url 'https://a/lx1.js,https://b/lx2.js'  # 多源同时激活
-#   ./install.sh --non-interactive --sources musicdl --webui \
+#   ./install.sh --non-interactive --sources qqmusic --webui \
 #       --enable-recommend --llm-base-url https://api.example.com/v1 --llm-api-key '***'
 # ==============================================================================
 
@@ -73,7 +70,6 @@ MODE_LABEL_DOCKER="Docker 单容器·按需加载"
 MODE_LABEL_NATIVE="原生宿主机·按需加载（无 Docker）"
 MODE_LABEL="${MODE_LABEL_DOCKER}"
 PIP_INDEX="${PIP_INDEX:-https://mirrors.tencent.com/pypi/simple/}"
-MUSICDL_REPO="${MUSICDL_REPO:-https://github.com/CharlesPikachu/musicdl}"
 MUSICBOX_REPO="${MUSICBOX_REPO:-https://github.com/darknessomi/musicbox}"
 BASE_IMAGE="${BASE_IMAGE:-}"
 DOCKER_IMAGE_MIRRORS="${DOCKER_IMAGE_MIRRORS:-docker.1ms.run docker.m.daocloud.io docker.1panel.live hub.rat.dev}"
@@ -177,17 +173,6 @@ usage() {
 
   --sources LIST         音源三选一（互斥，只能选一个源）：
                          1) musicbox  网易云音乐盒子（安装后扫码登录）
-                         2) musicdl   聚合音源，可精确到平台：
-                             --sources musicdl[-<平台短名>,...]
-                             或全局编号 --sources 2,4（编号见 musicdl-service/PLATFORMS.md）
-                         3) lxmusic   洛雪音乐自定义源（源脚本装后在管理页配置：
-                             URL / 上传 .js / NAS 选择；--lx-source-url 仍可选）
-                         示例: --sources musicbox
-                               --sources musicdl-kuwo,musicdl-migu
-                               --sources lxmusic --lx-source-url https://example.com/lx.js
-                               --sources lxmusic --lx-source-url 'https://a/lx1.js,https://b/lx2.js'（多源同时激活）
-                               --sources lxmusic（无源安装，装后在管理页配置）
-                         非交互缺省: musicdl
   --lx-source-url SRC    洛雪自定义源脚本地址：http(s) URL、file:// URL 或本机 .js 文件路径，
                          逗号分隔可同时配置多个源（全部校验通过后同时激活）
                          （本机路径会复制进 sources-data/lxmusic/uploads/ 并转为 file://；
@@ -199,7 +184,7 @@ usage() {
   --deploy MODE          部署形态：docker（默认，单容器，需 Docker）或
                          native（原生宿主机 systemd + supervisord，无需 Docker，
                          音源直接监听 127.0.0.1 发布端口，功能与 docker 完全一致）
-  --non-interactive      无交互，缺省值：音源=musicdl，不装 WebUI，不开启每日推荐
+  --non-interactive      无交互，缺省值：音源=qqmusic，不装 WebUI，不开启每日推荐
   --enable-recommend     开启大模型兜底推荐（需同时给 base-url 与 api-key；
                         仅当网易音源未启用时生效，平时每日推荐走音源原生推荐）
   --disable-recommend    明确关闭大模型兜底，并清除 .env 中已保存的 LLM 配置
@@ -220,72 +205,15 @@ EOF
 }
 
 # 全局音源-平台对照表：编号|提供者|短名|全名或代码|展示名|精选(1/0)
-# 与 musicdl-service/PLATFORMS.md 一一对应（proxy/tests/test_platform_table.py 同步校验）；
+# musicdl 音源已在 2.12.0 移除，此表仅保留 musicbox / qqmusic / lx 的条目；
 # 每个「源+平台」一个独立编号；新增平台只在表末追加，避免挤掉已有 ID。
 SOURCE_PLATFORM_TABLE='
 1|musicbox|netease|musicbox|网易云音乐|1
-2|musicdl|kuwo|KuwoMusicClient|酷我音乐|1
-3|musicdl|kugou|KugouMusicClient|酷狗音乐|1
-4|musicdl|migu|MiguMusicClient|咪咕音乐|1
-5|musicdl|qq|QQMusicClient|QQ音乐|1
-6|musicdl|qianqian|QianqianMusicClient|千千音乐|1
-7|musicdl|bilibili|BilibiliMusicClient|哔哩哔哩|1
-8|musicdl|netease|NeteaseMusicClient|网易云|0
-9|musicdl|bodian|BodianMusicClient|波点音乐|0
-10|musicdl|soda|SodaMusicClient|汽水音乐|0
-11|musicdl|fivesing|FiveSingMusicClient|5sing 原创音乐|0
-12|musicdl|streetvoice|StreetVoiceMusicClient|街声|0
-13|musicdl|moov|MOOVMusicClient|MOOV|0
-14|musicdl|youtube|YouTubeMusicClient|YouTube Music|0
-15|musicdl|joox|JooxMusicClient|JOOX|0
-16|musicdl|apple|AppleMusicClient|Apple Music|0
-17|musicdl|jamendo|JamendoMusicClient|Jamendo|0
-18|musicdl|soundcloud|SoundCloudMusicClient|SoundCloud|0
-19|musicdl|deezer|DeezerMusicClient|Deezer|0
-20|musicdl|qobuz|QobuzMusicClient|Qobuz|0
-21|musicdl|spotify|SpotifyMusicClient|Spotify|0
-22|musicdl|tidal|TIDALMusicClient|TIDAL|0
-23|musicdl|fma|FMAMusicClient|Free Music Archive|0
-24|musicdl|jiosaavn|JioSaavnMusicClient|JioSaavn|0
-25|musicdl|opengameart|OpenGameArtMusicClient|OpenGameArt|0
-26|musicdl|suno|SunoMusicClient|Suno|0
-27|musicdl|wikimediacommons|WikimediaCommonsMusicClient|Wikimedia Commons|0
-28|musicdl|audius|AudiusMusicClient|Audius|0
-29|musicdl|ccmixter|CCMixterMusicClient|ccMixter|0
-30|musicdl|ximalaya|XimalayaMusicClient|喜马拉雅|0
-31|musicdl|lizhi|LizhiMusicClient|荔枝FM|0
-32|musicdl|qingting|QingtingMusicClient|蜻蜓FM|0
-33|musicdl|lrts|LRTSMusicClient|LRTS|0
-34|musicdl|itunes|ITunesMusicClient|iTunes|0
-35|musicdl|mp3juice|MP3JuiceMusicClient|MP3Juice|0
-36|musicdl|tunehub|TuneHubMusicClient|TuneHub|0
-37|musicdl|gdstudio|GDStudioMusicClient|GDStudio|0
-38|musicdl|myfreemp3|MyFreeMP3MusicClient|MyFreeMP3|0
-39|musicdl|jbsou|JBSouMusicClient|JBSou|0
-40|musicdl|xiaobai|XiaoBaiMusicClient|小白音乐|0
-41|musicdl|mitu|MituMusicClient|Mitu|0
-42|musicdl|buguyy|BuguyyMusicClient|Buguyy|0
-43|musicdl|gequbao|GequbaoMusicClient|Gequbao|0
-44|musicdl|yinyuedao|YinyuedaoMusicClient|Yinyuedao|0
-45|musicdl|xiageba|XiagebaMusicClient|Xiageba|0
-46|musicdl|fangpi|FangpiMusicClient|Fangpi|0
-47|musicdl|fivesong|FiveSongMusicClient|FiveSong|0
-48|musicdl|kkws|KKWSMusicClient|KKWS|0
-49|musicdl|gequhai|GequhaiMusicClient|Gequhai|0
-51|musicdl|htqyy|HTQYYMusicClient|HTQYY|0
-52|musicdl|twot58|TwoT58MusicClient|TwoT58|0
-55|musicdl|mgmp3|MGMP3MusicClient|MGMP3|0
-57|musicdl|sgogo|SgogoMusicClient|Sgogo|0
-58|musicdl|xmfwav|XMFWAVMusicClient|XMFWAV|0
 59|lx|kg|kg|酷狗|1
 60|lx|wy|wy|网易|1
 61|lx|mg|mg|咪咕|1
 62|lx|kw|kw|酷我|1
 63|lx|tx|tx|QQ(仅搜索)|0
-64|musicdl|yinyueku|YinyuekuMusicClient|Yinyueku|0
-65|musicdl|gequke|GequkeMusicClient|Gequke|0
-66|musicdl|leedodo|LeedodoMusicClient|Leedodo|0
-67|musicdl|heishan|HeishanMusicClient|Heishan|0
 '
 
 # lx 平台别名 → 规范代码（与 lxmusic-service/app.py 的 _SOURCE_ALIASES 一致）
@@ -453,7 +381,8 @@ parse_sources() {
             qqmusic|qq)
                 ENABLE_QQMUSIC=1; picked+=("qqmusic") ;;
             musicdl|mdl)
-                ENABLE_MUSICDL=1; picked+=("musicdl") ;;
+                log_err "musicdl 音源已在 2.12.0 版本移除，请改用 qqmusic / musicbox / lxmusic"
+                exit 1 ;;
             lx|lxmusic)
                 ENABLE_LX=1; picked+=("lxmusic") ;;
             lx-all|lxmusic-all|lx-*|lxmusic-*)
@@ -472,23 +401,14 @@ parse_sources() {
                     lx_merge "${code}"
                 fi ;;
             musicdl-all|mdl-all)
-                ENABLE_MUSICDL=1; picked+=("musicdl")
-                MDL_EXPLICIT=1
-                mdl_merge "kuwo"
-                mdl_merge "migu" ;;
+                log_err "musicdl 音源已在 2.12.0 版本移除，请改用 qqmusic / musicbox / lxmusic"
+                exit 1 ;;
             musicdl-*|mdl-*)
-                ENABLE_MUSICDL=1; picked+=("musicdl")
-                MDL_EXPLICIT=1
-                plat="${part#*-}"
-                rec="$(mdl_platform_lookup "${plat}")" || {
-                    log_err "未知 musicdl 平台: ${plat}（全部平台的编号/短名见 musicdl-service/PLATFORMS.md）"
-                    exit 1
-                }
-                short="${rec#* }"; short="${short%% *}"
-                mdl_merge "${short}" ;;
+                log_err "musicdl 音源已在 2.12.0 版本移除，请改用 qqmusic / musicbox / lxmusic"
+                exit 1 ;;
             *)
                 rec="$(source_lookup_by_id "${part}")" || {
-                    log_err "未知音源: ${part}（可选 musicbox / qqmusic / musicdl[-平台] / lxmusic，或 musicdl-service/PLATFORMS.md 中的平台编号）"
+                    log_err "未知音源: ${part}（可选 musicbox / qqmusic / lxmusic）"
                     exit 1
                 }
                 provider="${rec%% *}"
@@ -505,7 +425,7 @@ parse_sources() {
         esac
     done
     if [ "${ENABLE_MUSICDL}" -eq 0 ] && [ "${ENABLE_MUSICBOX}" -eq 0 ] && [ "${ENABLE_QQMUSIC}" -eq 0 ] && [ "${ENABLE_LX}" -eq 0 ]; then
-        log_err "至少选择一个音源（musicbox / qqmusic / musicdl / lxmusic）"
+        log_err "至少选择一个音源（musicbox / qqmusic / lxmusic）"
         exit 1
     fi
     # v2.0.0 三源互斥：token 只能映射到一个 provider，跨 provider 直接拒绝
@@ -933,31 +853,19 @@ if [ "${NON_INTERACTIVE}" -eq 0 ]; then
     echo "============================================================"
     echo " fnmusic-ext 安装配置向导  v${FNMUSIC_VERSION}（${MODE_LABEL}）"
     echo " 音源: ${MUSICBOX_REPO}"
-    echo "       ${MUSICDL_REPO}"
     echo "       lxmusic — 洛雪音乐自定义源（装后在管理页配置源脚本）"
     echo "============================================================"
     if [ -z "${SOURCES_RAW}" ]; then
         echo "【音源三选一】（互斥单选；安装后可在 WebUI 里随时切换，秒级生效）"
         echo "  1) musicbox — 网易云音乐盒子（高品质/无损/歌词封面；推荐安装后扫码登录）"
         echo "  2) qqmusic  — QQ 音乐（QQ 扫码登录；未登录 128k，登录后按权益取 320k/无损）"
-        echo "  3) musicdl  — 聚合音源（多平台可选：酷我/咪咕/酷狗/QQ/B站等）"
-        echo "  4) lxmusic  — 洛雪音乐自定义源（解析播放只走用户源；源脚本装后在管理页配置：URL / 上传 .js / NAS 选择）"
-        local_choice="$(prompt "请选择音源 (输入 1/2/3/4)" "3")"
+        echo "  3) lxmusic  — 洛雪音乐自定义源（解析播放只走用户源；源脚本装后在管理页配置：URL / 上传 .js / NAS 选择）"
+        local_choice="$(prompt "请选择音源 (输入 1/2/3)" "2")"
         case "${local_choice}" in
             1) SOURCES_RAW="musicbox" ;;
-            2) SOURCES_RAW="qqmusic" ;;
-            4) SOURCES_RAW="lxmusic" ;;
-            *) SOURCES_RAW="musicdl" ;;
+            3) SOURCES_RAW="lxmusic" ;;
+            *) SOURCES_RAW="qqmusic" ;;
         esac
-        if [ "${SOURCES_RAW}" = "musicdl" ]; then
-            echo "【musicdl 平台多选】输入平台编号（逗号分隔），直接回车用默认精选（酷我+咪咕）"
-            print_featured_mdl_menu
-            mdl_choice="$(prompt "输入编号（2=酷我 4=咪咕 3=酷狗 5=QQ ...）" "2,4")"
-            case "${mdl_choice}" in
-                ''|all|ALL) : ;;  # 空=默认精选；all=沿用 .env 既有平台白名单
-                *) SOURCES_RAW="$(printf '%s' "${mdl_choice}" | tr ' ' ',')" ;;
-            esac
-        fi
     fi
     if [ -z "${WEBUI_CHOICE}" ]; then
         echo "【管理 Web UI】(端口 8774)：音源切换 / 扫码登录 / 平台选择 / 音质模式 /"
@@ -1003,7 +911,7 @@ if [ "${NON_INTERACTIVE}" -eq 0 ]; then
         *) RUN_EXTEND=1 ;;
     esac
 else
-    SOURCES_RAW="${SOURCES_RAW:-musicdl}"
+    SOURCES_RAW="${SOURCES_RAW:-qqmusic}"
     WEBUI_CHOICE="${WEBUI_CHOICE:-no}"
     if [ "${ENABLE_RECOMMEND}" = "yes" ]; then
         if [ -z "${LLM_BASE_URL}" ] || [ -z "${LLM_API_KEY}" ]; then
@@ -1093,7 +1001,6 @@ LX_SUMMARY=""
 SELECTED=""
 [ "${ENABLE_MUSICBOX}" -eq 1 ] && SELECTED="${SELECTED} musicbox[8770]"
 [ "${ENABLE_QQMUSIC}" -eq 1 ] && SELECTED="${SELECTED} qqmusic[8775]"
-[ "${ENABLE_MUSICDL}" -eq 1 ] && SELECTED="${SELECTED} musicdl[8768]${MDL_SUMMARY}"
 [ "${ENABLE_LX}" -eq 1 ] && SELECTED="${SELECTED} lxmusic[8772]${LX_SUMMARY}"
 
 # 卸载保留数据恢复：检测到持久目录且当前目录无 .env 时自动恢复
@@ -1138,7 +1045,7 @@ if [ -f "${BASE_DIR}/.env" ]; then
     if [ "${legacy_flags:-0}" -gt 1 ]; then
         if [ "${NON_INTERACTIVE}" -eq 1 ]; then
             log_err "检测到旧版 .env 同时启用了多个音源；v2.0.0 起三音源互斥单选。"
-            log_err "请用 --sources 指定唯一音源后重试（musicbox / musicdl / lxmusic）。"
+            log_err "请用 --sources 指定唯一音源后重试（musicbox / qqmusic / lxmusic）。"
             exit 1
         fi
         log_warn "检测到旧版 .env 同时启用了多个音源；v2.0.0 起三音源互斥单选，请重新选择。"
@@ -1747,7 +1654,7 @@ lx_verify_and_activate() {
                 log_warn "洛雪源校验未通过（${err_kind:-无输出}）：${entry}"
                 if [ "${NON_INTERACTIVE}" -eq 1 ]; then
                     log_err "洛雪源校验未通过（${err_kind:-unknown}）：${err_msg:-校验服务无响应}"
-                    log_err "安装已中止。可：1) 更换源脚本 URL 后重试；2) 改选 musicdl/musicbox 音源；"
+                    log_err "安装已中止。可：1) 更换源脚本 URL 后重试；2) 改选 musicbox / qqmusic 音源；"
                     log_err "3) 重装时勾选/追加 --lx-skip-verify 跳过校验（装好后在管理页 WebUI 查看/重配）"
                     return 1
                 fi
@@ -1850,7 +1757,7 @@ log_info "   打开飞牛音乐 Web 端或手机 App，在搜索框中搜索歌�
 log_info "   点击在线源歌曲试听，确认可以流畅播放并显示歌词与封面。"
 if [ "${WEBUI_FLAG}" = "true" ]; then
     log_info "3. 管理 Web UI：飞牛桌面「fnMusic 扩展管理」，或已登录管理员打开 /app/fnmusic-ext"
-    log_info "   • 音源单选随时切换（秒级）、musicdl 平台多选、网易/QQ 音乐扫码登录"
+    log_info "   • 音源单选随时切换（秒级）、网易/QQ 音乐扫码登录"
     log_info "   • 音质模式（高音质/平衡/流畅）、边听边存、推荐开关、LLM 配置"
 fi
 if [ "${ENABLE_MUSICBOX}" -eq 1 ]; then

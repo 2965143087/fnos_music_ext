@@ -16,7 +16,7 @@ if [ -f "${BACKUP_DIR}/data.tar.gz" ]; then
 fi
 
 SOURCES="$(fnmusic_saved_source)"
-[ -n "${SOURCES}" ] || SOURCES="musicdl"
+[ -n "${SOURCES}" ] || SOURCES="qqmusic"
 
 ARGS=(--non-interactive --sources "${SOURCES}" --webui --extend --adopt)
 if [ "${SOURCES}" = "lxmusic" ]; then

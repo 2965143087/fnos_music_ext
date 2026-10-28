@@ -112,7 +112,6 @@ fnmusic_saved_source() {
     if fnmusic_env_source FNMUSIC_NETEASE_ENABLED; then echo musicbox
     elif fnmusic_env_source FNMUSIC_QQMUSIC_ENABLED; then echo qqmusic
     elif fnmusic_env_source FNMUSIC_LX_ENABLED; then echo lxmusic
-    elif fnmusic_env_source FNMUSIC_MUSICDL_ENABLED; then echo musicdl
     else echo ""; fi
 }
 

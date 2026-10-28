@@ -5,6 +5,27 @@
 
 ## [Unreleased]
 
+## [2.12.0] - 2026-10-28
+
+### 移除
+
+- **删除 musicdl 音源**：主音源由四选一改为三选一（网易云 musicbox / QQ 音乐 / 洛雪 lxmusic）。
+  - 移除 `musicdl-service/` 整个服务目录、容器进程、8768 端口映射与 `FNMUSIC_MUSICDL_ENABLED` 开关
+  - 管理页移除 musicdl 卡片与「启用平台」多选面板；安装向导与 `--sources` 的 musicdl 选项一并下线
+  - `--sources musicdl` 等旧写法现在会明确报错提示改用其余三个音源，不再静默回退
+
+### 修复
+
+- **安装长时间卡在 55% 后失败**：根因是 Dockerfile 把所有音源的依赖合并在一条 `pip install` 里，
+  新增音源会让这一层缓存整体失效，musicdl 那几十个包（含编译型依赖）全部重下，任何一次断流都会
+  让整层失败。改为：
+  - 上游三份依赖保持原样独立成层，版本不变时可命中 Docker 层缓存直接跳过；
+  - QQ 音乐依赖拆为单独一层，只重建自己；
+  - 新增 `container/wheels/` 预置离线 wheel 目录，构建时 `pip --find-links` 优先本地安装，
+    缺失时才联网，并把重试提到 `--retries 10 --timeout 120`。
+- 删除 musicdl 后镜像构建不再需要 `curl_cffi` / `pycryptodomex` / `protobuf` 等重型依赖，
+  镜像体积与构建耗时同步下降。
+
 ## [2.11.0] - 2026-10-28
 
 基线：相对 2.10.2 的变更。
