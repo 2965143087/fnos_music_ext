@@ -1,10 +1,39 @@
-# fnmusic-ext · 飞牛音乐扩展
+# fnMusic 音源扩展 · QQ 音乐版
+
+> **这是 [javycoder/fnos_music_ext](https://github.com/javycoder/fnos_music_ext) 的第三方修改版**，
+> 在官方扩展基础上**新增 QQ 音乐音源**（手机 QQ 扫码登录 / 官方曲库搜索 / 播放直链 / 歌词）。
+> **不是原作者的正式发布**；本仓库的问题请提到本仓库 Issues，不要打扰上游作者。
+
+## 和上游有什么不同
+
+| 能力 | 上游 `javycoder/fnos_music_ext` | 本版（QQ 音乐版） |
+| :--- | :--- | :--- |
+| 主音源 | 网易云 / musicdl / 洛雪，三选一 | **四选一：新增 QQ 音乐** |
+| QQ 音乐接入方式 | 只能通过 musicdl 的 QQ 平台间接搜，可播性受上游库限制 | **内置独立音源服务**，直连官方 web 接口，扫码登录后取官方直链 |
+| QQ 扫码登录 | 无 | 手机 QQ 扫码换取 `qm_keyst`，登录态落盘；支持 Cookie 兜底 |
+| 音质 | 由所选源决定 | QQ 侧 128k → 320k → 无损 → 臻品逐档回退 |
+| 应用中心显示名 | fnMusic 音源扩展 | **fnMusic 音源扩展 · QQ 音乐版** |
+| 其余能力 | — | 与上游一致（网易云 / musicdl / 洛雪 / 边听边存 / 推荐 / 管理页） |
+
+上游原版：[GitHub](https://github.com/javycoder/fnos_music_ext) · [Gitee 镜像](https://gitee.com/javycoder/fnos_music_ext) · [原版 Release](https://github.com/javycoder/fnos_music_ext/releases)
+
+## 本版安装
+
+1. 到 [Releases](https://github.com/2965143087/fnos_music_ext/releases/latest) 下载 `fnmusic-ext-<版本>.fpk` 与 `.sha256`
+2. 飞牛「应用中心 → 手动安装」选择该文件（已装旧版会走升级流程，自动备份并恢复数据）
+3. 打开「fnMusic 扩展管理 → 音乐源 → QQ 音乐」→ 生成二维码 → 手机 QQ 扫码
+
+```bash
+# 或者从源码装（NAS 上执行）
+git clone https://github.com/2965143087/fnos_music_ext.git fnmusic_ext
+cd fnmusic_ext && ./install.sh --sources qqmusic --webui --extend
+```
+
+---
+
+[本仓库](https://github.com/2965143087/fnos_music_ext) · [上游原版](https://github.com/javycoder/fnos_music_ext) · [下载安装包](https://github.com/2965143087/fnos_music_ext/releases) · [更新日志](CHANGELOG.md) · [详细安装指南](docs/INSTALL.md)
 
 **保留飞牛音乐原生体验，为本地曲库补上在线搜索、播放、推荐与收藏能力。**
-
-[![CI](https://github.com/javycoder/fnos_music_ext/actions/workflows/ci.yml/badge.svg?branch=dev)](https://github.com/javycoder/fnos_music_ext/actions/workflows/ci.yml)
-
-[GitHub](https://github.com/javycoder/fnos_music_ext) · [Gitee 镜像](https://gitee.com/javycoder/fnos_music_ext) · [下载安装包](https://github.com/javycoder/fnos_music_ext/releases) · [更新日志](CHANGELOG.md) · [详细安装指南](docs/INSTALL.md)
 
 `fnmusic-ext` 是面向 fnOS（飞牛私有云）官方音乐应用 `trim.music` 的无侵入增强扩展。安装后，仍在熟悉的飞牛音乐 Web 端或 App 中搜索、听歌、收藏和管理歌单；音源与扩展设置则通过「fnMusic 扩展管理」完成。
 
