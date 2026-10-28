@@ -49,13 +49,16 @@
 
 ## 音源怎么选
 
-**主音源三选一，可随时在管理页切换。** 洛雪的「多个脚本同时激活」与网易的「歌单常驻」是附加能力，不改变主音源单选规则。
+**主音源四选一，可随时在管理页切换。** 洛雪的「多个脚本同时激活」与网易的「歌单常驻」是附加能力，不改变主音源单选规则。
 
 | 主音源 | 适合的使用方式 | 使用前须知 |
 | :--- | :--- | :--- |
 | **网易云 musicbox** | 网易搜索、账号歌单与每日推荐 | 支持扫码登录；会员、付费与试听限制取决于账号权益 |
+| **QQ 音乐 qqmusic** | QQ 音乐搜索、歌词与榜单 | 支持扫码登录；未登录只能试听 128k，登录后可用 320k / 无损，实际品质取决于账号权益 |
 | **musicdl** | 按平台选择在线搜索来源 | 当前集成 57 个平台；可用性随上游变化，建议只启用自己验证可靠的平台 |
 | **洛雪 lxmusic** | 使用自己信任的洛雪自定义源脚本 | 搜索、歌词与榜单由内置平台接口提供，播放解析交给用户脚本；不附送可用源 |
+
+QQ 音乐不提供公共歌单接入：切到该音源时，公共歌单与个人歌单入口按官方本地曲库与缓存展示，在线歌单能力自动关闭。
 
 洛雪脚本可通过 **URL、电脑上传 `.js`、NAS 文件选择**三种方式导入，支持备注、测试、多个脚本同时激活与解析失败接力。**导入前请自行审查来源安全，不要使用来历不明的脚本。** 脚本在音源服务的 Node.js 运行时中执行：Docker 部署在容器内，原生部署在宿主机上，不能将其视为安全沙箱。
 
@@ -74,7 +77,7 @@ musicdl 平台编号与短名见 [平台清单](musicdl-service/PLATFORMS.md)。
 
 1. 从 [GitHub Releases](https://github.com/javycoder/fnos_music_ext/releases) 下载最新正式版 `fnmusic-ext-<版本>.fpk`；GitHub 访问困难时可查看 [Gitee 发行版](https://gitee.com/javycoder/fnos_music_ext/releases)。
 2. 在 fnOS「应用中心 → 手动安装」选择安装包，按向导选择初始音源。
-3. 打开桌面「fnMusic 扩展管理」完成配置：网易可扫码登录，musicdl 勾选平台，洛雪需自行导入并激活源脚本后保存。
+3. 打开桌面「fnMusic 扩展管理」完成配置：网易、QQ 音乐可扫码登录，musicdl 勾选平台，洛雪需自行导入并激活源脚本后保存。
 4. 回到官方飞牛音乐，在搜索框输入歌名，试听带来源标记的在线结果。
 
 管理页使用飞牛管理员登录态，请从桌面入口或已登录的飞牛页面 `/app/fnmusic-ext` 打开，**不要直接访问 8774 端口**。
@@ -105,6 +108,9 @@ chmod +x install.sh extend.sh restore.sh proxy/run_proxy.sh
 
 # Docker：musicdl 酷我、咪咕 + 管理页
 ./install.sh --non-interactive --sources musicdl-kuwo,musicdl-migu --webui --extend
+
+# Docker：QQ 音乐 + 管理页，安装后扫码登录（登录后可听 320k / 无损）
+./install.sh --non-interactive --sources qqmusic --webui --extend
 
 # Docker：洛雪 + 管理页，装好后自行导入脚本
 ./install.sh --non-interactive --sources lxmusic --webui --extend
@@ -171,6 +177,7 @@ fnmusic-ext 代理（宿主机 systemd）
         ├─ 缓存 / 转码 / 下载落库
         └─ 音源服务与 WebUI（仅监听本机）
                 ├─ musicbox  127.0.0.1:8770
+                ├─ qqmusic   127.0.0.1:8775
                 ├─ musicdl   127.0.0.1:8768
                 ├─ lxmusic   127.0.0.1:8772
                 └─ WebUI     127.0.0.1:8774
@@ -181,6 +188,8 @@ fnmusic-ext 代理（宿主机 systemd）
 ## 常见问题
 
 **搜到歌曲却不能播放，或只能播放几十秒？** 先检查当前音源与账号权益。网易部分 VIP 歌曲无相应权益时只提供试听；第三方平台与洛雪脚本也可能失效。洛雪可先在管理页测试脚本，musicdl 可缩小到已验证的平台，必要时换源。
+
+**切到 QQ 音乐后只有 128k / 部分歌曲不能播？** QQ 音乐未登录只提供 128k 试听，320k 与无损需要账号权益：请在管理页「音乐源 → QQ 音乐」扫码登录，登录后重新搜索再播放。仍失败时多为该曲的版权或权益限制，可切回其他音源。
 
 **切到洛雪后为什么还看到网易歌单？** 检查是否开启「网易云歌单常驻」。这是歌单供数与播放能力，不会把网易结果混入洛雪搜索；取消常驻后，非网易主音源下会回收对应进程，登录态保留。
 
@@ -199,7 +208,7 @@ fnmusic-ext 代理（宿主机 systemd）
 - [musicdl 平台清单](musicdl-service/PLATFORMS.md)：平台编号、短名与退役情况。
 - [更新日志](CHANGELOG.md) · [贡献指南](CONTRIBUTING.md) · [安全反馈](SECURITY.md)。
 
-核心目录：`proxy/`（代理与业务适配）、`musicbox-service/`、`musicdl-service/`、`lxmusic-service/`（音源）、`webui-service/`（管理页）、`container/`（容器编排）、`packaging/fpk/`（应用包）。
+核心目录：`proxy/`（代理与业务适配）、`musicbox-service/`、`qqmusic-service/`、`musicdl-service/`、`lxmusic-service/`（音源）、`webui-service/`（管理页）、`container/`（容器编排）、`packaging/fpk/`（应用包）。
 
 ```bash
 python3 -m pytest          # 自动化测试；依赖与运行矩阵参见 CI 配置
@@ -214,4 +223,4 @@ python3 -m pytest          # 自动化测试；依赖与运行矩阵参见 CI �
 
 项目不托管音乐资源，不提供会员权限绕过服务；播放、缓存与下载的音频及元数据版权归原权利人所有。请仅访问自己有权使用的内容，遵守所在地区法律法规与第三方平台协议，支持正版。第三方脚本由用户自行提供并承担安全风险，源站可用性与音质不作保证。
 
-感谢 [CharlesPikachu/musicdl](https://github.com/CharlesPikachu/musicdl)、[darknessomi/musicbox](https://github.com/darknessomi/musicbox)、[XCQ0607/lxserver](https://github.com/XCQ0607/lxserver) 与洛雪音乐社区及所有贡献者。
+感谢 [CharlesPikachu/musicdl](https://github.com/CharlesPikachu/musicdl)、[darknessomi/musicbox](https://github.com/darknessomi/musicbox)、[XCQ0607/lxserver](https://github.com/XCQ0607/lxserver)、QQ 音乐接口封装 [L-1124/QQMusicApi](https://github.com/L-1124/QQMusicApi) 与洛雪音乐社区及所有贡献者。

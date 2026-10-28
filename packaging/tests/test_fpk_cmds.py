@@ -204,13 +204,16 @@ def test_common_repo_dir_precedence(sb):
 
 
 def test_common_saved_source_priority(sb):
-    """.env 三布尔→--sources：musicbox > lxmusic > musicdl，未配置为空。"""
+    """.env 音源布尔→--sources：musicbox > qqmusic > lxmusic > musicdl，未配置为空。"""
     cases = [
         ("FNMUSIC_NETEASE_ENABLED=true\n", "musicbox"),
+        ("FNMUSIC_QQMUSIC_ENABLED=true\n", "qqmusic"),
         ("FNMUSIC_LX_ENABLED=true\n", "lxmusic"),
         ("FNMUSIC_MUSICDL_ENABLED=true\n", "musicdl"),
-        # 三者并存取最高优先级，避免升级后源漂移
-        ("FNMUSIC_NETEASE_ENABLED=true\nFNMUSIC_LX_ENABLED=true\nFNMUSIC_MUSICDL_ENABLED=true\n", "musicbox"),
+        # 多个并存取最高优先级，避免升级后源漂移
+        ("FNMUSIC_NETEASE_ENABLED=true\nFNMUSIC_QQMUSIC_ENABLED=true\n"
+         "FNMUSIC_LX_ENABLED=true\nFNMUSIC_MUSICDL_ENABLED=true\n", "musicbox"),
+        ("FNMUSIC_QQMUSIC_ENABLED=true\nFNMUSIC_LX_ENABLED=true\n", "qqmusic"),
         ("FNMUSIC_LX_ENABLED=true\nFNMUSIC_MUSICDL_ENABLED=true\n", "lxmusic"),
         ("FNMUSIC_MUSICDL_ENABLED=false\n", ""),
         ("", ""),
@@ -330,6 +333,14 @@ def test_install_callback_defaults_invalid_source_to_musicdl(sb):
     result = sb.run("install_callback", wizard_sources="bogus", wizard_extend="true")
     assert result.returncode == 0, result.stderr
     assert sb.install_args() == ["--non-interactive --sources musicdl --webui --adopt --extend"]
+
+
+def test_install_callback_qqmusic_passthrough(sb):
+    """向导选 QQ 音乐时 --sources qqmusic 必须原样透传（不被回落成 musicdl）。"""
+    sb.make_repo()
+    result = sb.run("install_callback", wizard_sources="qqmusic", wizard_extend="true")
+    assert result.returncode == 0, result.stderr
+    assert sb.install_args() == ["--non-interactive --sources qqmusic --webui --adopt --extend"]
 
 
 def test_install_callback_lx_without_url_installs_sourceless(sb):

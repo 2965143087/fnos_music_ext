@@ -68,6 +68,7 @@ BASE_DIR="/test repo"
 CONTAINER_NAME=fnmusic-sources
 ENABLE_MUSICBOX=0
 ENABLE_MUSICDL=1
+ENABLE_QQMUSIC=0
 ENABLE_LX=0
 WEBUI_FLAG=false
 log_info() { printf '[INFO] %s\n' "$*"; }
@@ -304,6 +305,7 @@ FNMUSIC_ONLINE_SOURCES=
 LX_SOURCES=
 ENABLE_MUSICDL=0
 ENABLE_MUSICBOX=0
+ENABLE_QQMUSIC=0
 ENABLE_LX=0
 """
 
@@ -360,7 +362,8 @@ def acceptance_bindir(tmp_path: Path, **env: str) -> tuple[Path, dict]:
     write_stub(bindir, "curl", curl_stub_body(bindir))
     # URL 变量必须进环境：curl 桩是独立进程，靠 env 里的 URL 做 case 匹配
     defaults = {"LX_URL": "http://lx.test", "MUSICDL_URL": "http://mdl.test",
-                "MUSICBOX_URL": "http://mb.test"}
+                "MUSICBOX_URL": "http://mb.test", "QQMUSIC_URL": "http://qq.test",
+                "ENABLE_QQMUSIC": "0"}
     defaults.update(env)
     env_full = {**os.environ, "PATH": str(bindir), **defaults}
     return bindir, env_full

@@ -93,7 +93,7 @@ def check_musicbox():
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("service", choices=["musicdl", "musicbox", "lxmusic"])
+    parser.add_argument("service", choices=["musicdl", "musicbox", "qqmusic", "lxmusic"])
     parser.add_argument("--app-dir", type=Path, required=True)
     parser.add_argument("--require-non-root", action="store_true")
     args = parser.parse_args()
@@ -114,6 +114,17 @@ def main():
             import curl_cffi
             assert callable(musicdl.MusicClient)
             assert curl_cffi.requests.Session
+        elif args.service == "qqmusic":
+            from qqmusic_api.modules.song import SongFileType
+            import qqmusic_ext
+
+            # 音质映射必须落在上游真实存在的文件类型上（hi-res 用 getattr 兜底，不强求）
+            for name in ("MP3_128", "MP3_320", "FLAC"):
+                assert getattr(SongFileType, name, None) is not None, name
+            assert qqmusic_ext.QUALITY_MAP["standard"] == "MP3_128"
+            assert qqmusic_ext.QUALITY_MAP["exhigh"] == "MP3_320"
+            assert qqmusic_ext.QUALITY_MAP["lossless"] == "FLAC"
+            assert qqmusic_ext.QUALITY_LADDER["smooth"] == ["standard"]
         else:
             from lxserver_client import SUPPORTED_PLATFORMS
             from verify_source import parse_script_meta

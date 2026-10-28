@@ -17,6 +17,7 @@ TARGET_SOCK="/var/run/trim_music.socket"
 UPSTREAM_SOCK="/var/run/trim_music_upstream.socket"
 MUSICDL_URL="http://127.0.0.1:8768"
 MUSICBOX_URL="http://127.0.0.1:8770"
+QQMUSIC_URL="http://127.0.0.1:8775"
 LX_URL="http://127.0.0.1:8772"
 FORCE_RELOAD=0
 ADOPT=0
@@ -146,13 +147,16 @@ FNMUSIC_VERSION="$(head -n 1 "${BASE_DIR}/VERSION" 2>/dev/null | tr -d '[:space:
 FNMUSIC_VERSION="${FNMUSIC_VERSION:-0.0.0}"
 MUSICDL_URL="${FNMUSIC_MUSICDL_URL:-${MUSICDL_URL}}"
 MUSICBOX_URL="${FNMUSIC_MUSICBOX_URL:-${MUSICBOX_URL}}"
+QQMUSIC_URL="${FNMUSIC_QQMUSIC_URL:-${QQMUSIC_URL}}"
 LX_URL="${FNMUSIC_LX_URL:-${LX_URL}}"
 ENABLE_MUSICDL=0
 ENABLE_MUSICBOX=0
+ENABLE_QQMUSIC=0
 ENABLE_LX=0
 ENABLE_WEBUI=0
 is_enabled "${FNMUSIC_MUSICDL_ENABLED:-true}" && ENABLE_MUSICDL=1
 is_enabled "${FNMUSIC_NETEASE_ENABLED:-true}" && ENABLE_MUSICBOX=1
+is_enabled "${FNMUSIC_QQMUSIC_ENABLED:-false}" && ENABLE_QQMUSIC=1
 is_enabled "${FNMUSIC_LX_ENABLED:-false}" && ENABLE_LX=1
 is_enabled "${FNMUSIC_WEBUI_ENABLED:-false}" && ENABLE_WEBUI=1
 # 部署形态（v2.8.0a+）：docker（默认，单容器）| native（宿主机 systemd + supervisord）
@@ -164,8 +168,8 @@ case "${DEPLOY_MODE}" in
         exit 1
         ;;
 esac
-if [ "${ENABLE_MUSICDL}" -eq 0 ] && [ "${ENABLE_MUSICBOX}" -eq 0 ] && [ "${ENABLE_LX}" -eq 0 ]; then
-    log_err "至少需要启用一个音源（FNMUSIC_MUSICDL_ENABLED / FNMUSIC_NETEASE_ENABLED / FNMUSIC_LX_ENABLED）。"
+if [ "${ENABLE_MUSICDL}" -eq 0 ] && [ "${ENABLE_MUSICBOX}" -eq 0 ] && [ "${ENABLE_QQMUSIC}" -eq 0 ] && [ "${ENABLE_LX}" -eq 0 ]; then
+    log_err "至少需要启用一个音源（FNMUSIC_MUSICDL_ENABLED / FNMUSIC_NETEASE_ENABLED / FNMUSIC_QQMUSIC_ENABLED / FNMUSIC_LX_ENABLED）。"
     exit 1
 fi
 
@@ -357,6 +361,7 @@ except Exception:
     local sources=()
     [ "${ENABLE_MUSICDL}" -eq 1 ] && sources+=("musicdl")
     [ "${ENABLE_MUSICBOX}" -eq 1 ] && sources+=("musicbox")
+    [ "${ENABLE_QQMUSIC}" -eq 1 ] && sources+=("qqmusic")
     [ "${ENABLE_LX}" -eq 1 ] && sources+=("lxmusic")
 
     local src kw id
@@ -430,6 +435,7 @@ fi
 mkdir -p "${BASE_DIR}/sources-data/cache/netease-musicbox" \
     "${BASE_DIR}/sources-data/config/netease-musicbox" \
     "${BASE_DIR}/sources-data/netease-musicbox" \
+    "${BASE_DIR}/sources-data/qqmusic" \
     "${BASE_DIR}/sources-data/lxmusic"
 # 数据卷权限收紧：属主对齐容器 appuser（uid 1000），group/other 全收（凭据防本机其他用户读取）
 # 原生模式以 root 运行音源，不做 uid 对齐（目录布局两形态共用，切换时由 install 重新对齐）
@@ -440,7 +446,7 @@ find "${BASE_DIR}/sources-data" -type d -exec chmod 0700 {} + 2>/dev/null || tru
 find "${BASE_DIR}/sources-data" -type f -exec chmod 0600 {} + 2>/dev/null || true
 
 # 旧 v1.x 部署形态清理：宿主机三 unit + 三容器（释放端口 8768/8770/8772 给单容器）
-for unit in fnmusic-musicdl fnmusic-musicbox fnmusic-lxmusic; do
+for unit in fnmusic-musicdl fnmusic-musicbox fnmusic-qqmusic fnmusic-lxmusic; do
     stop_owned_source_unit "${unit}" || exit 1
     remove_owned_container "${unit}" || exit 1
 done
@@ -453,6 +459,7 @@ source_healthy() {
 need_start=0
 if [ "${ENABLE_MUSICDL}" -eq 1 ] && ! source_healthy "${MUSICDL_URL}"; then need_start=1; fi
 if [ "${ENABLE_MUSICBOX}" -eq 1 ] && ! source_healthy "${MUSICBOX_URL}"; then need_start=1; fi
+if [ "${ENABLE_QQMUSIC}" -eq 1 ] && ! source_healthy "${QQMUSIC_URL}"; then need_start=1; fi
 if [ "${ENABLE_LX}" -eq 1 ] && ! source_healthy "${LX_URL}"; then need_start=1; fi
 if [ "${ENABLE_WEBUI}" -eq 1 ] && ! source_healthy "http://127.0.0.1:8774"; then need_start=1; fi
 
@@ -550,6 +557,9 @@ wait_source() {
 
 if [ "${ENABLE_MUSICBOX}" -eq 1 ]; then
     wait_source "musicbox" "${MUSICBOX_URL}" || exit 1
+fi
+if [ "${ENABLE_QQMUSIC}" -eq 1 ]; then
+    wait_source "qqmusic" "${QQMUSIC_URL}" || exit 1
 fi
 if [ "${ENABLE_MUSICDL}" -eq 1 ]; then
     wait_source "musicdl" "${MUSICDL_URL}" 90 || exit 1
@@ -690,7 +700,7 @@ log_info "3. 健康检查与运维："
 log_info "   • 探测状态: curl -s --unix-socket /var/run/trim_music.socket http://localhost/_ext/healthz"
 log_info "   • 查看日志: sudo journalctl -u fnmusic-ext -f"
 if [ "${ENABLE_WEBUI}" -eq 1 ]; then
-    log_info "   • 管理 WebUI: 飞牛桌面「fnMusic 扩展管理」（仅管理员；音源三选一/音质/推荐/LLM 运行期可调）"
+    log_info "   • 管理 WebUI: 飞牛桌面「fnMusic 扩展管理」（仅管理员；音源单选/音质/推荐/LLM 运行期可调）"
 fi
 log_info "   • 一键还原: ./restore.sh (一键无损切回官方原生直连)"
 log_info "============================================================"

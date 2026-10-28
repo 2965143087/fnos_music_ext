@@ -60,7 +60,8 @@ def session(req, items):
 async def test_livez_never_constructs_dependency_clients(monkeypatch):
     def forbidden(*args):
         pytest.fail("liveness must not touch dependencies")
-    for name in ("get_upstream_client", "get_musicdl_client", "get_musicbox_client", "get_lx_client"):
+    for name in ("get_upstream_client", "get_musicdl_client", "get_musicbox_client",
+                 "get_qqmusic_client", "get_lx_client"):
         monkeypatch.setattr(p, name, forbidden)
     assert await p.ext_livez() == {"ok": True, "service": "fnmusic-ext", "pid": os.getpid()}
 
@@ -72,7 +73,10 @@ async def test_health_concurrent_wall_clock_budget(monkeypatch):
         started.append(time.monotonic())
         await asyncio.sleep(30)
     clients = []
-    for getter in ("get_upstream_client", "get_musicdl_client", "get_musicbox_client", "get_lx_client"):
+    # 健康检查只对启用音源探测：显式打开 QQ 音乐，纳入并发预算（与其他音源同口径）
+    monkeypatch.setitem(p.CONF, "qqmusic_enabled", True)
+    for getter in ("get_upstream_client", "get_musicdl_client", "get_musicbox_client",
+                   "get_qqmusic_client", "get_lx_client"):
         client = httpx.AsyncClient(transport=httpx.MockTransport(stalled), base_url="http://test")
         clients.append(client)
         monkeypatch.setattr(p, getter, lambda app, c=client: c)
@@ -80,7 +84,7 @@ async def test_health_concurrent_wall_clock_budget(monkeypatch):
     result = await p.ext_healthz(request())
     elapsed = time.monotonic() - before
     assert 2.3 < elapsed < 2.65
-    assert len(started) == 4 and max(started) - min(started) < .1
+    assert len(started) == 5 and max(started) - min(started) < .1
     assert not result["ok"] and result["degraded"]
     assert all(x["error"] == "TimeoutError" for x in result["details"].values())
     for client in clients:

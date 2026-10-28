@@ -127,7 +127,7 @@ class TestWizard:
         assert "wizard_webui_password" not in fields
         radio = next(it for it in items if it["type"] == "radio")
         values = {opt["value"] for opt in radio["options"]}
-        assert values == {"musicdl", "musicbox", "lxmusic"}
+        assert values == {"musicdl", "musicbox", "lxmusic", "qqmusic"}
 
     def test_fnpack_quirks(self, stage: Path):
         """fnpack 实测逆向出的两条硬规则（布尔 initValue / tips 用 text 会打包失败）。"""
@@ -286,6 +286,8 @@ class TestPayload:
             "fnmusic-ext.service", "VERSION",
             "proxy/app.py", "container/Dockerfile", "webui-service/app.py",
             "lxmusic-service/verify_source.py", "container/lxserver_compat.py",
+            "qqmusic-service/app.py", "qqmusic-service/qqmusic_ext.py",
+            "qqmusic-service/requirements.txt",
         ):
             assert (repo / rel).is_file(), f"payload 缺少运行所需文件 {rel}"
 

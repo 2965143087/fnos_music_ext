@@ -5,6 +5,18 @@
 
 ## [Unreleased]
 
+## [2.11.0] - 2026-10-28
+
+基线：相对 2.10.2 的变更。
+
+### 新增
+- 新增 **QQ 音乐（qqmusic）** 主音源：独立音源服务 `qqmusic-service/`（Docker 容器 8006 / 宿主机 8775），提供搜索、歌曲详情、歌词、推荐与热门榜单；播放链接按账号权益在无损 / 320k / 128k 之间自动降级。
+- QQ 音乐支持管理页扫码登录：在「音乐源 → QQ 音乐」扫码确认即可，登录态与设备信息持久化到 `sources-data/qqmusic/`；未登录只能试听 128k，登录后可用 320k / 无损。
+- 安装向导与 `--sources` 增加 `qqmusic` 选项（主音源由三选一调整为四选一）；`.env` 增加 `FNMUSIC_QQMUSIC_ENABLED`、`FNMUSIC_QQMUSIC_QUALITY`、`FNMUSIC_QQMUSIC_SEARCH_LIMIT`。
+
+### 变更
+- QQ 音乐不接入公共歌单：切到该音源时在线公共歌单入口自动关闭，不显示其他音源的在线歌单。
+- 音源服务计数口径更新：Docker 单容器由四个程序增至五个（含 qqmusic），native 形态同步；健康检查与 `/_ext/healthz` 增加 qqmusic 项。
 ## [2.10.2] - 2026-10-23
 
 基线：相对 2.10.1 的变更。

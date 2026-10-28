@@ -747,6 +747,7 @@ log_warn() { printf 'warn %s\\n' "$*"; }
 log_err() { printf 'err %s\\n' "$*"; }
 ENABLE_MUSICBOX=0
 ENABLE_MUSICDL=1
+ENABLE_QQMUSIC=0
 ENABLE_LX=0
 WEBUI_FLAG=true
 CONTAINER_NAME=fnmusic-sources

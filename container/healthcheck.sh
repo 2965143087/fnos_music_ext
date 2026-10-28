@@ -24,6 +24,7 @@ check() {
 
 check musicdl FNMUSIC_MUSICDL_ENABLED
 check musicbox FNMUSIC_NETEASE_ENABLED
+check qqmusic FNMUSIC_QQMUSIC_ENABLED
 # 网易云歌单常驻（issue #38）：musicbox 非当前音源但常驻开启时应常驻运行。
 # 只捕捉崩溃循环（FATAL/BACKOFF）；webui 对账的主动停止（如未登录回收）属
 # 正常态，不算失败——避免 cookie 失效期间容器长期 unhealthy。

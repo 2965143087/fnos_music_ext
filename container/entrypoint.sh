@@ -85,6 +85,8 @@ if [ "$(env_flag FNMUSIC_MUSICDL_ENABLED)" = "true" ]; then
     start_prog musicdl
 elif [ "$(env_flag FNMUSIC_NETEASE_ENABLED)" = "true" ]; then
     start_prog musicbox
+elif [ "$(env_flag FNMUSIC_QQMUSIC_ENABLED)" = "true" ]; then
+    start_prog qqmusic
 elif [ "$(env_flag FNMUSIC_LX_ENABLED)" = "true" ]; then
     start_prog lxserver
     start_prog lxmusic

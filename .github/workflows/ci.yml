@@ -129,7 +129,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        service: [musicdl, musicbox, lxmusic]
+        service: [musicdl, musicbox, qqmusic, lxmusic]
         python: ['3.11', '3.13']
     steps:
       - uses: actions/checkout@v4
@@ -184,7 +184,7 @@ jobs:
           cache-to: type=gha,mode=max,scope=fnmusic-images-${{ matrix.arch }}
       - name: Verify non-root contract for each bundled service
         run: |
-          for svc in musicdl musicbox lxmusic; do
+          for svc in musicdl musicbox qqmusic lxmusic; do
             docker run --rm --platform '${{ matrix.platform }}' --network none --user 1000 --entrypoint python \
               -v "$PWD/tests/integration/production_contract.py:/tmp/production_contract.py:ro" \
               fnmusic-sources:ci /tmp/production_contract.py \

@@ -53,6 +53,19 @@ stdout_logfile=@RUN@/musicbox.log
 stdout_logfile_maxbytes=0
 redirect_stderr=true
 
+[program:qqmusic]
+directory=@REPO@/qqmusic-service
+command="@VENV@/bin/uvicorn" app:app --host 127.0.0.1 --port 8775
+autostart=false
+autorestart=true
+startretries=5
+stopsignal=TERM
+stopasgroup=true
+killasgroup=true
+stdout_logfile=@RUN@/qqmusic.log
+stdout_logfile_maxbytes=0
+redirect_stderr=true
+
 [program:lxserver]
 directory=@REPO@/.lxserver
 command="@NODE@" index.js
