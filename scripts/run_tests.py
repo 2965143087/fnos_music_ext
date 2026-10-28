@@ -27,12 +27,14 @@ PHASES = (
         "webui": ("webui-service",),
         "musicdl": ("musicdl-service",),
         "lxmusic": ("lxmusic-service",),
+        "qqmusic": ("qqmusic-service",),
     },
     {"infrastructure": ("container", "packaging/tests", "tests/runner")},
 )
 SUITES = {name: paths for phase in PHASES for name, paths in phase.items()}
 COVERAGE_TARGETS = (
     "proxy", "lxmusic-service", "musicdl-service", "musicbox-service", "webui-service",
+    "qqmusic-service",
 )
 
 

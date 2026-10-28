@@ -791,7 +791,7 @@ def test_healthz_timeout_dumps_container_diagnostics():
     install = (BASE/'install.sh').read_text(encoding='utf-8')
     extend = (BASE/'extend.sh').read_text(encoding='utf-8')
     common = (BASE/'proxy'/'install_common.sh').read_text(encoding='utf-8')
-    assert install.count('diagnose_sources_container "${CONTAINER_NAME}"') == 4
+    assert install.count('diagnose_sources_container "${CONTAINER_NAME}"') == 5
     assert 'diagnose_sources_container "${CONTAINER_NAME}"' in extend
     assert 'supervisorctl' in common
     assert 'logs --tail' in common

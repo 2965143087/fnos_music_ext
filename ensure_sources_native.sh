@@ -66,7 +66,7 @@ LXSERVER_DIR="${FNMUSIC_LXSERVER_DIR:-${BASE_DIR}/.lxserver}"
 LXSERVER_VERSION_FILE="${BASE_DIR}/container/lxserver.version"
 LXSERVER_ARTIFACT_DIR="${BASE_DIR}/container/lxserver-artifact"
 PIP_INDEX="${PIP_INDEX:-https://mirrors.tencent.com/pypi/simple/}"
-FNMUSIC_DEPS_REVISION="sources-20261019-1"
+FNMUSIC_DEPS_REVISION="sources-20261028-qq"
 FALLBACK_INDEXES="https://mirrors.aliyun.com/pypi/simple/ https://pypi.tuna.tsinghua.edu.cn/simple https://pypi.org/simple"
 APT_MIRROR="${FNMUSIC_APT_MIRROR:-}"
 
@@ -80,6 +80,7 @@ REQ_FILES=(
     "${BASE_DIR}/musicbox-service/requirements.txt"
     "${BASE_DIR}/lxmusic-service/requirements.txt"
     "${BASE_DIR}/webui-service/requirements.txt"
+    "${BASE_DIR}/qqmusic-service/requirements.txt"
 )
 for req in "${REQ_FILES[@]}"; do
     if [ ! -f "${req}" ]; then

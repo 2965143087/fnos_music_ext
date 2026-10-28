@@ -5,6 +5,17 @@
 
 ## [Unreleased]
 
+## [2.11.0] - 2026-10-28
+
+### 新增
+- 新增 **QQ 音乐音源**（`qqmusic-service/`，本机 8776）：直连 QQ 音乐官方 web 接口，不依赖第三方 SDK 或洛雪脚本，提供搜索、播放直链、歌词、详情、榜单与账号歌单。
+  - 支持**手机 QQ 扫码登录**（xlogin → ptqrshow → ptqrlogin → check_sig → qm_keyst），登录态落盘 `/data/qqmusic/session.json`（0600），重启不丢失；扫码链路异常时可在管理页用「Cookie 登录」粘贴 `uin`/`qm_keyst` 兜底。
+  - 音质阶梯 `hires/lossless/exhigh/higher/standard` 逐档回退；未登录不交付 30 秒试听片段（取链直接 401），避免"播到一半跳歌"。
+  - 代理层接入：搜索聚合（本地优先、深分页独立游标）、取链钉链与降级、详情/歌词共用 musicbox 兼容路径、来源标记 `[QQ]`、`FNMUSIC_QQ_ENABLED` 热重载。
+  - 管理页「音乐源」由三选一变为**四选一**，新增 QQ 扫码登录卡片与 Cookie 兜底入口；`install.sh --sources qqmusic`、容器 supervisord/compose/Dockerfile、原生部署与 `.env.example` 同步。
+  - FPK 安装包：向导新增「QQ 音乐」初始音源选项，安装回调白名单与升级时的音源还原（`cmd/_common`）同步支持 `qqmusic`。
+  - 新增跨平台打包器 `packaging/fpk/build_offline.py`：不依赖 rsync 与官方 `fnpack`，按官方包结构（gzip(tar) + app.tgz + manifest checksum=md5(app.tgz)）直接产出 `.fpk`，Windows/macOS 亦可出包。
+
 ## [2.10.2] - 2026-10-23
 
 基线：相对 2.10.1 的变更。

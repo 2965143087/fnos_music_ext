@@ -9,7 +9,7 @@
             {
                 "type": "radio",
                 "field": "wizard_sources",
-                "label": "初始音源（三选一）",
+                "label": "初始音源（四选一）",
                 "initValue": "musicdl",
                 "options": [
                     {
@@ -23,6 +23,10 @@
                     {
                         "label": "lxmusic — 洛雪自定义源（安装后在管理页配置源脚本：粘贴 URL / 上传 .js / NAS 选择）",
                         "value": "lxmusic"
+                    },
+                    {
+                        "label": "qqmusic — QQ 音乐（官方曲库，安装后在管理页用手机 QQ 扫码登录）",
+                        "value": "qqmusic"
                     }
                 ],
                 "rules": [
@@ -34,7 +38,7 @@
             },
             {
                 "type": "tips",
-                "helpText": "选择洛雪自定义源时无需在此提供脚本：安装完成后用飞牛管理员打开桌面「fnMusic 扩展管理」，在「音乐源 → 洛雪自定义源」里粘贴脚本 URL、上传电脑上的 .js 文件或从 NAS 选择，测试可用后保存即激活。"
+                "helpText": "选择洛雪自定义源时无需在此提供脚本：安装完成后用飞牛管理员打开桌面「fnMusic 扩展管理」，在「音乐源 → 洛雪自定义源」里粘贴脚本 URL、上传电脑上的 .js 文件或从 NAS 选择，测试可用后保存即激活。选择 QQ 音乐时，安装完成后同样在「音乐源 → QQ 音乐」用手机 QQ 扫码登录（未登录只能搜索、不能播放）。"
             },
             {
                 "type": "switch",

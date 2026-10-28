@@ -8,7 +8,7 @@ const APP_BASE = "/app/fnmusic-ext";
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => Array.from(document.querySelectorAll(sel));
 
-const PROVIDER_LABEL = { musicdl: "musicdl 聚合音源", musicbox: "网易云音乐盒子", lxmusic: "洛雪自定义源", none: "未配置" };
+const PROVIDER_LABEL = { musicdl: "musicdl 聚合音源", musicbox: "网易云音乐盒子", lxmusic: "洛雪自定义源", qqmusic: "QQ 音乐", none: "未配置" };
 const PROC_LABEL = { musicdl: "musicdl", musicbox: "musicbox", lxserver: "lxserver", lxmusic: "lxmusic", webui: "WebUI" };
 
 let configValues = {};   // GET /api/config 的 values
@@ -273,10 +273,12 @@ function applyConfigToForm() {
   const v = configValues;
   const provider = v.FNMUSIC_NETEASE_ENABLED === "true" ? "musicbox"
     : v.FNMUSIC_MUSICDL_ENABLED === "true" ? "musicdl"
-    : v.FNMUSIC_LX_ENABLED === "true" ? "lxmusic" : "";
+    : v.FNMUSIC_LX_ENABLED === "true" ? "lxmusic"
+    : v.FNMUSIC_QQ_ENABLED === "true" ? "qqmusic" : "";
   $$("input[name=provider]").forEach((el) => { el.checked = el.value === provider; });
   syncProviderPanels(provider);
   if (provider === "musicbox") syncNeteaseAccount();
+  if (provider === "qqmusic") syncQqAccount();
   const quality = v.FNMUSIC_QUALITY_MODE || "high";
   $$("input[name=quality]").forEach((el) => { el.checked = el.value === quality; });
   const dlQuality = v.FNMUSIC_DL_QUALITY || "app";
@@ -351,6 +353,7 @@ function collectConfig() {
     FNMUSIC_MUSICDL_ENABLED: provider === "musicdl",
     FNMUSIC_NETEASE_ENABLED: provider === "musicbox",
     FNMUSIC_LX_ENABLED: provider === "lxmusic",
+    FNMUSIC_QQ_ENABLED: provider === "qqmusic",
     FNMUSIC_QUALITY_MODE: ($$("input[name=quality]").find((el) => el.checked) || {}).value || "high",
     FNMUSIC_DL_QUALITY: ($$("input[name=dl-quality]").find((el) => el.checked) || {}).value || "app",
     FNMUSIC_RECOMMEND_HOT: $("#recommend-hot").checked,
@@ -493,7 +496,8 @@ function savedProvider() {
   const v = configValues;
   return v.FNMUSIC_NETEASE_ENABLED === "true" ? "musicbox"
     : v.FNMUSIC_MUSICDL_ENABLED === "true" ? "musicdl"
-    : v.FNMUSIC_LX_ENABLED === "true" ? "lxmusic" : "";
+    : v.FNMUSIC_LX_ENABLED === "true" ? "lxmusic"
+    : v.FNMUSIC_QQ_ENABLED === "true" ? "qqmusic" : "";
 }
 
 // 点选未启用的音源：临时拉起其进程供预览（不写配置；5 分钟内未保存自动停止）
@@ -517,11 +521,13 @@ function syncProviderPanels(provider) {
   $("#panel-musicbox").hidden = provider !== "musicbox";
   $("#panel-musicdl").hidden = provider !== "musicdl";
   $("#panel-lxmusic").hidden = provider !== "lxmusic";
+  $("#panel-qqmusic").hidden = provider !== "qqmusic";
 }
 $$("input[name=provider]").forEach((el) =>
   el.addEventListener("change", async () => {
     syncProviderPanels(el.value);
     if (el.value === "musicbox") syncNeteaseAccount();
+    if (el.value === "qqmusic") syncQqAccount();
     markDirty("音源切换需保存后生效");
     if (el.value && el.value !== savedProvider() && await startPreview(el.value)) {
       if (el.value === "musicdl") await loadPlatforms(false);
@@ -1294,6 +1300,115 @@ $("#netease-playlist-resident").addEventListener("change", () => {
     $("#netease-my-playlists").checked = true;
   }
 });
+
+/* -------------------------------------------------------------- QQ 音乐扫码 */
+// QQ 音源的轮询状态码与网易盒子对齐：800 过期 / 801 待扫 / 802 待确认 / 803 成功，
+// 因此这里直接复用上面那套"出码 → 轮询 → 成功后同步账号态"的流程。
+let qqQrTimer = null;
+
+async function syncQqAccount() {
+  try {
+    const st = await api("/api/qq/auth/status");
+    const d = (st && st.data) || st || {};
+    if (d.logged_in) {
+      const who = d.nick || (d.uin ? `QQ ${d.uin}` : "已登录");
+      $("#qq-check").textContent = `当前登录：${who}${d.vip ? "（VIP）" : ""}`;
+    } else {
+      $("#qq-check").textContent = "未登录：可搜索，播放需先登录";
+    }
+  } catch (_) {
+    $("#qq-check").textContent = "QQ 音源服务未运行";
+  }
+}
+
+function stopQqQrPolling() {
+  if (qqQrTimer) { clearInterval(qqQrTimer); qqQrTimer = null; }
+}
+
+async function checkQqQrStatus(unikey) {
+  const st = await api(`/api/qq/auth/login/check?unikey=${encodeURIComponent(unikey)}`);
+  const code = st?.data?.code ?? st?.code;
+  const msg = st?.data?.message ?? st?.message;
+  if (code === 803) {
+    stopQqQrPolling();
+    $("#qq-qr-status").textContent = "登录成功 ✓";
+    toast("QQ 音乐登录成功", "ok");
+    syncQqAccount();
+  } else if (code === 802) {
+    $("#qq-qr-status").textContent = "已扫码，请在手机上确认";
+  } else if (code === 800) {
+    stopQqQrPolling();
+    $("#qq-qr-status").textContent = "二维码已过期，请重新生成";
+  } else {
+    $("#qq-qr-status").textContent = msg || "等待扫码…";
+  }
+}
+
+async function startQqQrLogin() {
+  stopQqQrPolling();
+  $("#qq-qr-status").textContent = "正在生成二维码…";
+  $("#qq-qr-img").hidden = true;
+  syncQqAccount();
+  const callLogin = () => api("/api/qq/auth/login", { method: "POST" });
+  try {
+    let resp;
+    try {
+      resp = await callLogin();
+    } catch (exc) {
+      // QQ 音源进程未运行（未点选/预览过期）：临时拉起后重试一次
+      if (!await startPreview("qqmusic")) throw exc;
+      resp = await callLogin();
+    }
+    const d = resp.data || resp;
+    const unikey = d.unikey || "";
+    if (!unikey) throw new Error("未获取到扫码会话");
+    if (d.image) {
+      $("#qq-qr-img").src = d.image;  // 服务端已把官方二维码转成 data URL
+    } else {
+      $("#qq-qr-img").src = `${APP_BASE}/api/qq/qr?unikey=${encodeURIComponent(unikey)}`;
+    }
+    $("#qq-qr-img").hidden = false;
+    $("#qq-qr-status").textContent = "请用手机 QQ 扫描二维码";
+    qqQrTimer = setInterval(() => { checkQqQrStatus(unikey).catch(() => {}); }, 2000);
+  } catch (exc) {
+    $("#qq-qr-status").textContent = "生成失败：" + exc.message;
+  }
+}
+
+async function saveQqCookie() {
+  const raw = ($("#qq-cookie").value || "").trim();
+  if (!raw) { toast("请先粘贴 cookie", "fail"); return; }
+  try {
+    await api("/api/qq/auth/cookie", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ cookie: raw }),
+    });
+    $("#qq-cookie").value = "";
+    $("#qq-qr-status").textContent = "已用 Cookie 登录";
+    toast("QQ 音乐登录成功", "ok");
+    syncQqAccount();
+  } catch (exc) {
+    toast("Cookie 登录失败：" + exc.message, "fail");
+  }
+}
+
+async function logoutQq() {
+  try {
+    await api("/api/qq/auth/logout", { method: "POST" });
+    stopQqQrPolling();
+    $("#qq-qr-img").hidden = true;
+    $("#qq-qr-status").textContent = "已退出登录";
+    toast("已退出 QQ 音乐", "ok");
+    syncQqAccount();
+  } catch (exc) {
+    toast("退出失败：" + exc.message, "fail");
+  }
+}
+
+if ($("#qq-qr-btn")) $("#qq-qr-btn").addEventListener("click", startQqQrLogin);
+if ($("#qq-cookie-btn")) $("#qq-cookie-btn").addEventListener("click", saveQqCookie);
+if ($("#qq-logout-btn")) $("#qq-logout-btn").addEventListener("click", logoutQq);
 
 /* -------------------------------------------------------------- lx 源测试 */
 function escapeHtml(str) {

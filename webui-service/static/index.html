@@ -60,7 +60,7 @@
 
       <!-- 音乐源 -->
       <section class="page" id="page-source">
-        <h2>音乐源（三选一）</h2>
+        <h2>音乐源（四选一）</h2>
         <div class="provider-grid">
           <label class="provider-card" data-provider="musicbox">
             <input type="radio" name="provider" value="musicbox">
@@ -76,6 +76,11 @@
             <input type="radio" name="provider" value="lxmusic">
             <div class="provider-head">洛雪自定义源</div>
             <div class="provider-desc">粘贴洛雪自定义源脚本 URL，播放解析全走用户源</div>
+          </label>
+          <label class="provider-card" data-provider="qqmusic">
+            <input type="radio" name="provider" value="qqmusic">
+            <div class="provider-head">QQ 音乐</div>
+            <div class="provider-desc">QQ 扫码登录，官方曲库搜索播放，需登录才有完整音质</div>
           </label>
         </div>
 
@@ -97,6 +102,31 @@
             <div class="card-title">网易账号歌单</div>
             <label class="switch-row"><span>音乐页显示网易账号歌单<div class="sub">需要「网易云音乐盒子」已启用并扫码登录。开启后，网易账号里自己创建的歌单会出现在音乐页「热门推荐」下方、官方歌单上方，点开就能听；收藏的他人歌单不显示。歌单只读：在音乐页往里加歌、移歌或删除都不会写回网易。默认关闭，保存后立即生效。</div></span><input type="checkbox" id="netease-my-playlists"></label>
             <label class="switch-row"><span>网易云歌单常驻<div class="sub">勾选后即使切换到其它音乐源，网易账号歌单和网易公共歌单仍可显示播放，网易盒子进程保持常驻运行。账号歌单仍需扫码登录；公共歌单可匿名常驻。搜索结果仍仅在选中「网易云音乐盒子」音源时使用网易，不与其它音源聚合。</div></span><input type="checkbox" id="netease-playlist-resident"></label>
+          </div>
+        </div>
+
+        <!-- qqmusic：扫码登录 + Cookie 兜底 -->
+        <div class="subpanel" id="panel-qqmusic" hidden>
+          <div class="card">
+            <div class="card-title">QQ 音乐登录</div>
+            <p class="hint">手机 QQ 扫码授权（与 y.qq.com 网页登录同一流程）。登录态保存在数据卷，重启不丢失。未登录时只能搜索、拿不到播放直链。</p>
+            <div class="qr-area">
+              <img id="qq-qr-img" alt="QQ 登录二维码" hidden>
+              <div id="qq-qr-status" class="muted">点击下方按钮生成二维码</div>
+            </div>
+            <div class="btn-row">
+              <button class="btn" id="qq-qr-btn">生成二维码</button>
+              <button class="btn" id="qq-logout-btn">退出登录</button>
+              <span id="qq-check" class="muted"></span>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-title">Cookie 登录（扫码失败时兜底）</div>
+            <p class="hint">浏览器打开 y.qq.com 用 QQ 登录后，F12 → Application → Cookies，复制包含 <code>uin</code>、<code>qm_keyst</code>（或 <code>qqmusic_key</code>）的完整 Cookie 粘贴到下方。</p>
+            <textarea class="input" id="qq-cookie" rows="3" placeholder="uin=o0123456789; qm_keyst=Q_H_L_..."></textarea>
+            <div class="btn-row">
+              <button class="btn" id="qq-cookie-btn">用 Cookie 登录</button>
+            </div>
           </div>
         </div>
 

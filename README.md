@@ -49,11 +49,12 @@
 
 ## 音源怎么选
 
-**主音源三选一，可随时在管理页切换。** 洛雪的「多个脚本同时激活」与网易的「歌单常驻」是附加能力，不改变主音源单选规则。
+**主音源四选一，可随时在管理页切换。** 洛雪的「多个脚本同时激活」与网易的「歌单常驻」是附加能力，不改变主音源单选规则。
 
 | 主音源 | 适合的使用方式 | 使用前须知 |
 | :--- | :--- | :--- |
 | **网易云 musicbox** | 网易搜索、账号歌单与每日推荐 | 支持扫码登录；会员、付费与试听限制取决于账号权益 |
+| **QQ 音乐 qqmusic** | QQ 官方曲库搜索、歌词与榜单 | 内置音源，免安装第三方脚本；管理页手机 QQ 扫码登录后可播放，会员曲目受账号权益限制 |
 | **musicdl** | 按平台选择在线搜索来源 | 当前集成 57 个平台；可用性随上游变化，建议只启用自己验证可靠的平台 |
 | **洛雪 lxmusic** | 使用自己信任的洛雪自定义源脚本 | 搜索、歌词与榜单由内置平台接口提供，播放解析交给用户脚本；不附送可用源 |
 
@@ -109,6 +110,9 @@ chmod +x install.sh extend.sh restore.sh proxy/run_proxy.sh
 # Docker：洛雪 + 管理页，装好后自行导入脚本
 ./install.sh --non-interactive --sources lxmusic --webui --extend
 
+# Docker：QQ 音乐 + 管理页，装好后在管理页手机 QQ 扫码登录
+./install.sh --non-interactive --sources qqmusic --webui --extend
+
 # 无 Docker：原生部署，依赖要求与补装行为见安装指南
 ./install.sh --deploy native --non-interactive --sources musicbox --webui --extend
 ```
@@ -131,6 +135,8 @@ chmod +x install.sh extend.sh restore.sh proxy/run_proxy.sh
 | 公共歌单 | `FNMUSIC_PUBLIC_PLAYLISTS_ENABLED` | 默认关闭，选单在管理页完成 |
 | 网易账号歌单 / 常驻 | `FNMUSIC_NETEASE_MY_PLAYLISTS` / `FNMUSIC_NETEASE_PLAYLIST_RESIDENT` | 默认关闭；账号歌单仍需登录 |
 | 收藏自动绑定本地 | `FNMUSIC_FAV_AUTO_BIND` | 默认关闭，显式收藏或加入歌单后下载并等待官方入库再绑定；浏览列表不触发音频下载 |
+| QQ 音源音质 | `FNMUSIC_QQ_QUALITY` | `standard` / `higher` / `exhigh` / `lossless`（默认）/ `hires`，逐档回退到有直链的档位 |
+| QQ 搜索条数 | `FNMUSIC_QQ_SEARCH_LIMIT` | 单次向 QQ 音源取的在线条数（默认 20），深分页按此步长翻页 |
 | 大模型接口 | `FNMUSIC_LLM_BASE_URL` / `FNMUSIC_LLM_API_KEY` / `FNMUSIC_LLM_MODEL` | 接口地址和密钥须完整；模型默认 `gpt-4o-mini`，仅填写接口不启用用途 |
 | 大模型接口协议 | `FNMUSIC_LLM_PROTOCOL` | `chat`（默认，`/chat/completions`）或 `responses`（`/responses`），两种协议均完整实现 |
 | 大模型单次输出上限 | `FNMUSIC_LLM_MAX_TOKENS` | 256–131072（默认 8192，含推理 token）；DeepSeek 等推理模型吃满预算导致正文为空时调大，或用 `FNMUSIC_LLM_EXTRA_BODY` 关闭思考（如 `{"thinking":{"type":"disabled"}}`） |
@@ -171,6 +177,7 @@ fnmusic-ext 代理（宿主机 systemd）
         ├─ 缓存 / 转码 / 下载落库
         └─ 音源服务与 WebUI（仅监听本机）
                 ├─ musicbox  127.0.0.1:8770
+                ├─ qqmusic   127.0.0.1:8776
                 ├─ musicdl   127.0.0.1:8768
                 ├─ lxmusic   127.0.0.1:8772
                 └─ WebUI     127.0.0.1:8774
@@ -199,12 +206,29 @@ fnmusic-ext 代理（宿主机 systemd）
 - [musicdl 平台清单](musicdl-service/PLATFORMS.md)：平台编号、短名与退役情况。
 - [更新日志](CHANGELOG.md) · [贡献指南](CONTRIBUTING.md) · [安全反馈](SECURITY.md)。
 
-核心目录：`proxy/`（代理与业务适配）、`musicbox-service/`、`musicdl-service/`、`lxmusic-service/`（音源）、`webui-service/`（管理页）、`container/`（容器编排）、`packaging/fpk/`（应用包）。
+核心目录：`proxy/`（代理与业务适配）、`musicbox-service/`、`musicdl-service/`、`lxmusic-service/`、`qqmusic-service/`（音源）、`webui-service/`（管理页）、`container/`（容器编排）、`packaging/fpk/`（应用包）。
 
 ```bash
 python3 -m pytest          # 自动化测试；依赖与运行矩阵参见 CI 配置
-./packaging/fpk/build.sh   # 本地打包到 dist/，需准备 fnpack 等构建依赖
+./packaging/fpk/build.sh   # Linux 打包到 dist/：依赖 rsync + 官方 fnpack（缺失时自动下载）
+python3 packaging/fpk/build_offline.py   # 跨平台打包（Windows/macOS 可用）：不依赖 rsync/fnpack
 ```
+
+`build_offline.py` 按官方包结构直接产出同构 `.fpk`（gzip(tar) + app.tgz +
+`checksum = md5(app.tgz)`），常见的本地出包姿势：
+
+```bash
+# 完整包（lxserver 离线产物从 container/lxserver-artifact 或 .build/cache 读取并校验 SHA256）
+python3 packaging/fpk/build_offline.py
+
+# 指定预编译包目录 / 打赏二维码（CI 里由 scripts/gen_alipay_qr.py 生成）
+python3 packaging/fpk/build_offline.py \
+    --artifact-dir container/lxserver-artifact \
+    --alipay-png webui-service/static/alipay.png
+```
+
+产物为 `dist/fnmusic-ext-<版本>.fpk` 与同名 `.sha256`；在飞牛「应用中心 → 手动安装」
+选中该文件即可（已装旧版会走升级流程，自动备份并恢复用户数据）。
 
 版本号以根目录 `VERSION` 为准，功能变更见 `CHANGELOG.md`。发布须遵循项目发布规则，文档更新本身不要求修改版本号或创建 Release。
 

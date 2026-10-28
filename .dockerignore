@@ -1,8 +1,9 @@
-# 统一镜像构建上下文：只送四个服务目录 + container/，仓库其余内容（数据/缓存/密钥）不进镜像
+# 统一镜像构建上下文：只送五个服务目录 + container/，仓库其余内容（数据/缓存/密钥）不进镜像
 *
 !musicdl-service/
 !musicbox-service/
 !lxmusic-service/
+!qqmusic-service/
 !webui-service/
 !container/
 # 服务复用的公共 proxy 模块逐文件放行（目录先放行再收窄，父目录被排除时无法重新包含）

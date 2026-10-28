@@ -88,8 +88,10 @@ elif [ "$(env_flag FNMUSIC_NETEASE_ENABLED)" = "true" ]; then
 elif [ "$(env_flag FNMUSIC_LX_ENABLED)" = "true" ]; then
     start_prog lxserver
     start_prog lxmusic
+elif [ "$(env_flag FNMUSIC_QQ_ENABLED)" = "true" ]; then
+    start_prog qqmusic
 else
-    log "未配置任何音源（FNMUSIC_MUSICDL_ENABLED/FNMUSIC_NETEASE_ENABLED/FNMUSIC_LX_ENABLED 均未启用）"
+    log "未配置任何音源（FNMUSIC_MUSICDL_ENABLED/FNMUSIC_NETEASE_ENABLED/FNMUSIC_LX_ENABLED/FNMUSIC_QQ_ENABLED 均未启用）"
 fi
 
 # 网易云歌单常驻（issue #38）：当前音源不是 musicbox 但勾选常驻，且有网易
