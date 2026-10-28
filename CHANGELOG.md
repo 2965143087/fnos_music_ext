@@ -5,6 +5,16 @@
 
 ## [Unreleased]
 
+## [2.11.3] - 2026-10-28
+
+### 修复
+- 修复 2.11.2 在**选择 QQ 音乐安装时部署中断**：`extend.sh`（安装/升级的第二步）只认三个旧开关，把「只启用 QQ」判成「一个音源都没启用」并 `exit 1`，应用中心随即报安装失败（日志：`[ERROR] 至少需要启用一个音源（FNMUSIC_MUSICDL_ENABLED / FNMUSIC_NETEASE_ENABLED / FNMUSIC_LX_ENABLED）`）。
+  - `extend.sh`：新增 `ENABLE_QQ` / `QQ_URL` 解析、四选一校验、`need_start` 健康探测、`wait_source` 就绪等待、验收搜索探针分支、`sources-data/qqmusic` 数据目录与收尾登录指引。
+  - `install.sh`：升级时「多源并存」检测把 `FNMUSIC_QQ_ENABLED` 算入；`FNMUSIC_QQ_URL` 纳入 `ENV_EXPLICIT`（切源可覆盖旧值）。
+  - 原生 supervisord 增加 `FNMUSIC_QQ_DATA_DIR`（不再让 root 往宿主 `/data` 另写一份登录态）；容器 supervisord 显式声明 `/data/qqmusic`。
+- 修复「版本号是新的、管理页菜单还是旧的（看不到 QQ 音乐）」：前端改为**优先读部署目录**（`/repo/webui-service/static`）那份，镜像内副本仅作兜底。此前静态页烤在镜像里，一旦镜像因故未重建，就会出现 VERSION 已升级而 UI 未升级。
+- 回归测试：新增 `proxy/tests/test_qq_source.py` 三组部署脚本契约（extend/install/容器与原生进程表必须认识 QQ）、`webui-service/test_webui.py` 静态目录优先级两条。
+
 ## [2.11.2] - 2026-10-28
 
 ### 变更

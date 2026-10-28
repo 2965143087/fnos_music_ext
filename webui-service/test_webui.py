@@ -141,7 +141,7 @@ def test_put_rejects_multi_provider(env_file):
     with authed_client() as client:
         r = client.put("/api/config", json={"values": {"FNMUSIC_LX_ENABLED": "true"}})
         assert r.status_code == 400
-        assert "三选一" in r.json()["error"]
+        assert "只能启用一个" in r.json()["error"]
 
 
 def test_put_rejects_zero_provider(env_file):
@@ -2474,3 +2474,43 @@ def test_hidden_toggled_elements_not_defeated_by_display():
                 f"#{el_id} 靠 hidden 属性切换，但 .{cls} 的 display 声明会压过 UA 的 "
                 f"[hidden] 规则导致常显——需补 .{cls}[hidden] 或 #{el_id}[hidden] "
                 f"{{ display: none; }} 兜底")
+
+
+# ------------------------------------------------- 静态目录优先级（升级自愈） ---
+
+def test_static_dir_prefers_deployed_repo(monkeypatch, tmp_path):
+    """前端取部署目录那份，避免"镜像没重建 → 版本新菜单旧"。
+
+    2.11.2 事故：宿主代码已升级（VERSION 读到新版），但容器跑的是旧镜像，
+    镜像里烤着的 static 还是三音源页面，用户看到"没有 QQ 音乐选项"。
+    """
+    repo = tmp_path / "repo"
+    static = repo / "webui-service" / "static"
+    static.mkdir(parents=True)
+    (static / "index.html").write_text("<html>new</html>", encoding="utf-8")
+
+    monkeypatch.setenv("WEBUI_REPO_DIR", str(repo))
+    monkeypatch.delenv("WEBUI_STATIC_DIR", raising=False)
+    name = "webui_static_probe"
+    spec = importlib.util.spec_from_file_location(name, HERE / "app.py")
+    mod = importlib.util.module_from_spec(spec)
+    try:
+        spec.loader.exec_module(mod)
+        assert mod.STATIC_DIR == static
+    finally:
+        sys.modules.pop(name, None)
+
+
+def test_static_dir_falls_back_to_bundled(monkeypatch, tmp_path):
+    """部署目录没有前端（裸跑 app.py）时仍用镜像内副本，不能起不来。"""
+    monkeypatch.setenv("WEBUI_REPO_DIR", str(tmp_path / "empty"))
+    monkeypatch.delenv("WEBUI_STATIC_DIR", raising=False)
+    name = "webui_static_probe_fallback"
+    spec = importlib.util.spec_from_file_location(name, HERE / "app.py")
+    mod = importlib.util.module_from_spec(spec)
+    try:
+        spec.loader.exec_module(mod)
+        assert mod.STATIC_DIR == HERE / "static"
+        assert (mod.STATIC_DIR / "index.html").is_file()
+    finally:
+        sys.modules.pop(name, None)

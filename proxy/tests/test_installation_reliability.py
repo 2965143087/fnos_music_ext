@@ -495,13 +495,13 @@ printf "bare [%s] [%s] %s %s\\n" "$LX_PLATFORMS" "$MDL_PLATFORMS" "$LX_EXPLICIT"
 
 
 def test_parse_sources_rejects_cross_provider_mix():
-    """v2.0.0 三源互斥：跨 provider 组合直接报错。"""
+    """四音源互斥：跨 provider 组合直接报错（含 QQ 音乐）。"""
     block = install_platform_block()
     for raw in ('musicbox,musicdl', 'netease,lx-kw', 'musicdl,lxmusic',
                 '1,2', '1,2,4,59,60,61,62', 'musicdl-kuwo,lx-kw'):
         result = run_install_bash(block + f'parse_sources "{raw}"')
         assert result.returncode != 0, raw
-        assert '音源三选一' in result.stderr, raw
+        assert '音源互斥' in result.stderr, raw
         assert '互斥' in result.stderr, raw
 
 

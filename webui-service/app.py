@@ -72,6 +72,14 @@ ENV_PATH = Path(CONF["repo_dir"]) / ".env"
 VERSION_PATH = Path(CONF["repo_dir"]) / "VERSION"
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
+# 前端优先用部署目录里那份（容器内 /repo 是宿主代码的挂载，原生即仓库目录）。
+# 镜像内的 static 是构建时烤进去的副本：升级时宿主代码先落盘（VERSION 立刻变新），
+# 若镜像因故没重建，就会出现"版本号是新的、菜单还是旧的"（2.11.2 实测如此）。
+# 代码与前端一起更新，用挂载副本才能保证两者永远同版本。
+_REPO_STATIC = Path(CONF["repo_dir"]) / "webui-service" / "static"
+if (_REPO_STATIC / "index.html").is_file() and os.access(_REPO_STATIC / "index.html", os.R_OK):
+    STATIC_DIR = _REPO_STATIC
+
 # ------------------------------------------------------------------ 检查更新 --
 # 双源顺序即回退顺序：优先 GitHub Releases，被墙/限流/超时等失败时回退 Gitee。
 # 命中哪个源，前端"升级"按钮就跳哪个源的 release 页。
@@ -95,7 +103,7 @@ _UPDATE_HEADERS = {"User-Agent": f"fnmusic-ext/{SERVICE_VERSION}"}
 # {"ts": float, "data": dict}：ts 为写入时间，data 为最终响应体（失败结果无 source 键）
 _update_cache: dict = {}
 
-# 音源进程 ↔ 启用开关（三选一互斥）
+# 音源进程 ↔ 启用开关（四选一互斥）
 PROVIDERS = {
     "musicdl": "FNMUSIC_MUSICDL_ENABLED",
     "musicbox": "FNMUSIC_NETEASE_ENABLED",
@@ -858,7 +866,7 @@ def validate_updates(values: dict) -> dict[str, str]:
         if key not in SCHEMA:
             raise ValueError(f"不支持的配置键: {key}")
         updates[key] = _normalize_value(key, raw)
-    # 三选一互斥：以"应用后的最终状态"判断
+    # 四选一互斥：以"应用后的最终状态"判断
     final = dict(read_env())
     final.update(updates)
     # 储存目录互斥：缓存目录与下载目录不能相同或互为父子（否则滚动缓存被官方扫描进曲库）
@@ -876,7 +884,7 @@ def validate_updates(values: dict) -> dict[str, str]:
     enabled = [name for name, key in PROVIDERS.items()
                if final.get(key, SCHEMA[key]["default"]).lower() in ("true", "1", "yes")]
     if len(enabled) > 1:
-        raise ValueError(f"音源三选一：{'、'.join(enabled)} 同时启用，请只保留一个")
+        raise ValueError(f"音源只能启用一个：{'、'.join(enabled)} 同时启用，请只保留一个")
     if updates.keys() & _PROVIDER_KEYS and not enabled:
         raise ValueError("至少需要启用一个音源")
     if "FNMUSIC_LLM_EXTRA_BODY" in updates:
@@ -939,7 +947,7 @@ async def _lifespan(_app: FastAPI):
 
     async def _resident_boot():
         # 开机自愈：常驻开启且非 musicbox 音源时拉起 musicbox（entrypoint 只认
-        # 三选一开关，容器/原生重启后由这里兜底；先等 supervisor 就绪再跑）
+        # 四选一开关，容器/原生重启后由这里兜底；先等 supervisor 就绪再跑）
         await asyncio.sleep(5.0)
         try:
             values = read_env()

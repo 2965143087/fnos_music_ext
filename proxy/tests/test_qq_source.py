@@ -191,3 +191,55 @@ def test_musicbox_like_client_routes_by_source(monkeypatch):
     monkeypatch.setattr(pa, "get_musicbox_client", lambda _app: sentinel_nm)
     assert musicbox_like_client(object(), "qqmusic") is sentinel_qq
     assert musicbox_like_client(object(), "netease") is sentinel_nm
+
+
+# --------------------------------------------------------------- 部署脚本契约 ---
+# 事故回归：2.11.2 的 FPK 在飞牛上装到一半报「至少需要启用一个音源」——
+# extend.sh 只认三个旧开关，选了 QQ 也判成"一个都没启用"，安装器随即失败。
+# 这里锁死：凡是按音源开关分派的脚本，必须认识 QQ。
+
+from pathlib import Path
+
+BASE = Path(__file__).resolve().parents[2]
+
+
+def test_extend_sh_understands_qq_source():
+    text = (BASE / "extend.sh").read_text(encoding="utf-8")
+    # 开关解析
+    assert 'FNMUSIC_QQ_ENABLED:-false}" && ENABLE_QQ=1' in text
+    assert 'FNMUSIC_QQ_URL:-${QQ_URL}' in text
+    # 四选一校验：QQ 必须出现在"至少启用一个"的判断里
+    guard = text.split("至少需要启用一个音源")[0]
+    last_if = guard[guard.rindex("if ["):]
+    assert "ENABLE_QQ" in last_if, "extend.sh 的四选一校验漏了 ENABLE_QQ"
+    # 启动、探活、等待、搜索探针四处都要有 QQ 分支
+    assert '[ "${ENABLE_QQ}" -eq 1 ] && ! source_healthy "${QQ_URL}"' in text
+    assert 'wait_source "qqmusic" "${QQ_URL}"' in text
+    assert '[ "${ENABLE_QQ}" -eq 1 ] && sources+=("qqmusic")' in text
+    assert '${QQ_URL}/api/v1/search' in text
+    # 数据目录要落在共享卷里，别让 root 在宿主 /data 另起一份
+    assert 'sources-data/qqmusic' in text
+
+
+def test_install_sh_qq_flag_written_and_explicit():
+    text = (BASE / "install.sh").read_text(encoding="utf-8")
+    assert "FNMUSIC_QQ_ENABLED='${QQ_FLAG}'" in text
+    assert "FNMUSIC_QQ_URL='http://127.0.0.1:8776'" in text
+    # 显式列表决定切源时能否覆盖旧值
+    explicit = [ln for ln in text.splitlines() if ln.startswith("ENV_EXPLICIT=")][0]
+    assert "FNMUSIC_QQ_ENABLED" in explicit
+    assert 'FNMUSIC_QQ_URL"' in text
+    # 升级检测要把 QQ 算进"多源并存"
+    assert "FNMUSIC_(MUSICDL|NETEASE|LX|QQ)_ENABLED=" in text
+
+
+def test_container_and_native_start_qqmusic():
+    entry = (BASE / "container" / "entrypoint.sh").read_text(encoding="utf-8")
+    assert "FNMUSIC_QQ_ENABLED" in entry and "start_prog qqmusic" in entry
+    health = (BASE / "container" / "healthcheck.sh").read_text(encoding="utf-8")
+    assert "check qqmusic FNMUSIC_QQ_ENABLED" in health
+    sup = (BASE / "container" / "supervisord.conf").read_text(encoding="utf-8")
+    assert "[program:qqmusic]" in sup and 'FNMUSIC_QQ_DATA_DIR="/data/qqmusic"' in sup
+    native = (BASE / "container" / "supervisord-native.conf.in").read_text(encoding="utf-8")
+    assert "[program:qqmusic]" in native
+    assert 'FNMUSIC_QQ_DATA_DIR="@DATA@/qqmusic"' in native

@@ -5,7 +5,7 @@ set -euo pipefail
 # fnmusic-ext 一键安装 / 配置（v2.0.0：Docker 单容器·按需加载）
 # - 仅支持 Docker 部署：三音源 + WebUI 合并为单容器 fnmusic-sources，
 #   supervisor 管理四个程序，只启动当前所选音源（切源秒级，不重建容器）
-# - 音源三选一（互斥单选，可随时在 WebUI 里切换）：
+# - 音源四选一（互斥单选，可随时在 WebUI 里切换）：
 #     1 musicbox https://github.com/darknessomi/musicbox  (:8770 网易云，推荐扫码登录)
 #     2 musicdl  https://github.com/CharlesPikachu/musicdl (:8768 聚合, 可选平台)
 #     3 lxmusic  洛雪音乐自定义源（用户自带源 URL 解析播放）
@@ -394,7 +394,7 @@ apply_source_row() {
 
 print_featured_source_menu() {
     local id provider short full label star
-    echo "精选编号对照（v2.0.0 音源三选一；musicdl 源内可多选平台）:"
+    echo "精选编号对照（音源四选一；musicdl 源内可多选平台）:"
     while IFS='|' read -r id provider short full label star; do
         [ -z "${id}" ] && continue
         [ "${star}" = "1" ] || continue
@@ -411,7 +411,7 @@ print_featured_source_menu() {
         esac
     done <<< "${SOURCE_PLATFORM_TABLE}"
     echo "完整编号见 musicdl-service/PLATFORMS.md（1=网易云, 2–58 及 64=musicdl, 59–63=lx；53 已退役）。"
-    echo "交互向导请输入 1/2/3 三选一；musicdl 平台用 2,4 这类编号，不可与 1 或 59–63 混选。"
+    echo "交互向导请输入 1/2/3/4 四选一；musicdl 平台用 2,4 这类编号，不可与 1 或 59–63 混选。"
 }
 
 # musicdl 平台多选子菜单（v2.0.0：音源三选一后，musicdl 源内可继续多选平台）
@@ -515,7 +515,7 @@ parse_sources() {
     local provider_count
     provider_count="$(printf '%s\n' "${picked[@]}" | sort -u | wc -l | tr -d ' ')"
     if [ "${provider_count}" -gt 1 ]; then
-        log_err "音源三选一：检测到同时选择了 ${unique_providers}(v2.0.0 起三个音源互斥单选)"
+        log_err "音源互斥：检测到同时选择了 ${unique_providers}（四个音源只能启用一个）"
         log_err "请只保留一个音源重新执行；已装 WebUI 时可随时在 WebUI(8774) 里秒级切换音源"
         log_err "旧版本 .env 中的多源配置请重新选择一个后继续"
         exit 1
@@ -1132,18 +1132,18 @@ fi
 # Reapply after retained-data restoration, before any service starts.
 configure_app_logs || { log_err "无法安全配置私有共享日志目录: ${APP_LOG_DIR}"; exit 1; }
 
-# v2.0.0 升级检测：旧 .env 三源并存（多 true）时强制重新三选一
+# 升级检测：旧 .env 多源并存（多 true）时强制重新选一个
 if [ -f "${BASE_DIR}/.env" ]; then
-    legacy_flags="$(grep -E "^\s*(export\s+)?FNMUSIC_(MUSICDL|NETEASE|LX)_ENABLED=" "${BASE_DIR}/.env" 2>/dev/null \
+    legacy_flags="$(grep -E "^\s*(export\s+)?FNMUSIC_(MUSICDL|NETEASE|LX|QQ)_ENABLED=" "${BASE_DIR}/.env" 2>/dev/null \
         | tail -20 | sed -e "s/^.*=//" -e "s/['\"]//g" | tr '[:upper:]' '[:lower:]' \
         | grep -c -E '^(true|1|yes)$' || true)"
     if [ "${legacy_flags:-0}" -gt 1 ]; then
         if [ "${NON_INTERACTIVE}" -eq 1 ]; then
-            log_err "检测到旧版 .env 同时启用了多个音源；v2.0.0 起三音源互斥单选。"
-            log_err "请用 --sources 指定唯一音源后重试（musicbox / musicdl / lxmusic）。"
+            log_err "检测到旧版 .env 同时启用了多个音源；四个音源互斥，只能启用一个。"
+            log_err "请用 --sources 指定唯一音源后重试（musicbox / musicdl / lxmusic / qqmusic）。"
             exit 1
         fi
-        log_warn "检测到旧版 .env 同时启用了多个音源；v2.0.0 起三音源互斥单选，请重新选择。"
+        log_warn "检测到旧版 .env 同时启用了多个音源；四个音源互斥，请重新选择。"
     fi
 fi
 
@@ -1267,6 +1267,7 @@ ENV_DESIRED="$(mktemp)"
 # 用户本次明确提供了新值的键（音源开关/WebUI/版本/部署模式为安装时部署选项，始终采用新值）
 ENV_EXPLICIT="FNMUSIC_MUSICDL_ENABLED,FNMUSIC_NETEASE_ENABLED,FNMUSIC_LX_ENABLED,FNMUSIC_QQ_ENABLED,FNMUSIC_WEBUI_ENABLED,FNMUSIC_VERSION,FNMUSIC_DEPLOY_MODE,FNMUSIC_SEARCH_PROBE"
 [ "${ENABLE_LX}" -eq 1 ] && ENV_EXPLICIT="${ENV_EXPLICIT},FNMUSIC_LX_URL"
+[ "${ENABLE_QQ:-0}" -eq 1 ] && ENV_EXPLICIT="${ENV_EXPLICIT},FNMUSIC_QQ_URL"
 # lx 源种子（校验通过后会再写一次推导出的 LX_SOURCE_LIST/LX_SOURCES）
 [ "${ENABLE_LX}" -eq 1 ] && [ -n "${LX_SOURCE_URLS}" ] && ENV_EXPLICIT="${ENV_EXPLICIT},LX_SOURCE_LIST,LX_SOURCE_URL"
 # 平台显式选择（向导菜单或 lx-kw/musicdl-kuwo 等 token）时覆盖平台键；裸音源 token 不动既有值
