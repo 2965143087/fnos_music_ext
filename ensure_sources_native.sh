@@ -8,7 +8,7 @@ set -euo pipefail
 #   1. 选择合格宿主机 Python（显式配置 → fnOS python312 → 系统），确保
 #      .venv-sources 存在；依赖未变化且校验通过时跳过联网安装
 #      （容器内由镜像 pip 层安装；多 pip 源回退链与 ensure_proxy_deps.sh 同策略）
-#   2. 检测 nodejs（lxserver Node 沙箱）/ ffmpeg（musicdl 无损探针），缺失时
+#   2. 检测 nodejs（lxserver Node 沙箱）/ ffmpeg（代理侧转封装兜底），缺失时
 #      尝试 sudo apt-get 安装，失败给出手动命令
 #   3. lxserver 预编译包落位 .lxserver/：container/lxserver-artifact/ 预置优先
 #      （离线/fpk 场景），缺失走镜像加速下载链；sha256 校验 + 补丁与 Dockerfile
@@ -66,7 +66,7 @@ LXSERVER_DIR="${FNMUSIC_LXSERVER_DIR:-${BASE_DIR}/.lxserver}"
 LXSERVER_VERSION_FILE="${BASE_DIR}/container/lxserver.version"
 LXSERVER_ARTIFACT_DIR="${BASE_DIR}/container/lxserver-artifact"
 PIP_INDEX="${PIP_INDEX:-https://mirrors.tencent.com/pypi/simple/}"
-FNMUSIC_DEPS_REVISION="sources-20261019-1"
+FNMUSIC_DEPS_REVISION="sources-20261028-1"
 FALLBACK_INDEXES="https://mirrors.aliyun.com/pypi/simple/ https://pypi.tuna.tsinghua.edu.cn/simple https://pypi.org/simple"
 APT_MIRROR="${FNMUSIC_APT_MIRROR:-}"
 
@@ -76,7 +76,6 @@ log_err() { echo -e "\033[31m[ERROR]\033[0m $*" >&2; }
 
 # ---------------------------------------------------------------- 1. venv + pip
 REQ_FILES=(
-    "${BASE_DIR}/musicdl-service/requirements.txt"
     "${BASE_DIR}/musicbox-service/requirements.txt"
     "${BASE_DIR}/qqmusic-service/requirements.txt"
     "${BASE_DIR}/lxmusic-service/requirements.txt"
@@ -117,7 +116,7 @@ fi
 REQ_DIGEST="$(deps_requirements_digest "${REQ_FILES[@]}")"
 if [ "${FNMUSIC_REFRESH_DEPS:-0}" != "1" ] \
    && deps_state_valid "${VENV_DIR}" "${FNMUSIC_DEPS_REVISION}" "${VENV_PYTHON}" \
-        "${REQ_DIGEST}" supervisor musicdl fastapi uvicorn httpx curl_cffi PIL qrcode multipart; then
+        "${REQ_DIGEST}" supervisor fastapi uvicorn httpx curl_cffi PIL qrcode multipart; then
     log_info "音源服务 Python 依赖已就绪，跳过联网安装。"
     SKIP_PIP_INSTALL=1
 fi
@@ -152,7 +151,7 @@ if [ "${SKIP_PIP_INSTALL:-0}" != "1" ]; then
         exit 1
     fi
     if ! "${PIP_BIN}" check >/dev/null 2>&1 \
-       || ! deps_imports_ok "${VENV_PYTHON}" supervisor musicdl fastapi uvicorn httpx curl_cffi PIL qrcode multipart; then
+       || ! deps_imports_ok "${VENV_PYTHON}" supervisor fastapi uvicorn httpx curl_cffi PIL qrcode multipart; then
         log_err "依赖安装后校验失败（pip check 或关键模块导入失败）。"
         exit 1
     fi

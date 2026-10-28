@@ -154,7 +154,9 @@ ENABLE_MUSICBOX=0
 ENABLE_QQMUSIC=0
 ENABLE_LX=0
 ENABLE_WEBUI=0
-is_enabled "${FNMUSIC_MUSICDL_ENABLED:-true}" && ENABLE_MUSICDL=1
+# musicdl 音源已在 2.12.0 移除：恒为禁用，忽略 .env 中旧版本遗留的 true，
+# 否则会去等一个已不存在的服务（wait_source 90s 后 exit 1 导致安装失败）。
+ENABLE_MUSICDL=0
 is_enabled "${FNMUSIC_NETEASE_ENABLED:-true}" && ENABLE_MUSICBOX=1
 is_enabled "${FNMUSIC_QQMUSIC_ENABLED:-false}" && ENABLE_QQMUSIC=1
 is_enabled "${FNMUSIC_LX_ENABLED:-false}" && ENABLE_LX=1
@@ -168,8 +170,8 @@ case "${DEPLOY_MODE}" in
         exit 1
         ;;
 esac
-if [ "${ENABLE_MUSICDL}" -eq 0 ] && [ "${ENABLE_MUSICBOX}" -eq 0 ] && [ "${ENABLE_QQMUSIC}" -eq 0 ] && [ "${ENABLE_LX}" -eq 0 ]; then
-    log_err "至少需要启用一个音源（FNMUSIC_MUSICDL_ENABLED / FNMUSIC_NETEASE_ENABLED / FNMUSIC_QQMUSIC_ENABLED / FNMUSIC_LX_ENABLED）。"
+if [ "${ENABLE_MUSICBOX}" -eq 0 ] && [ "${ENABLE_QQMUSIC}" -eq 0 ] && [ "${ENABLE_LX}" -eq 0 ]; then
+    log_err "至少需要启用一个音源（FNMUSIC_NETEASE_ENABLED / FNMUSIC_QQMUSIC_ENABLED / FNMUSIC_LX_ENABLED）。"
     exit 1
 fi
 
