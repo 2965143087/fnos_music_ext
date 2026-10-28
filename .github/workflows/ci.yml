@@ -49,7 +49,7 @@ jobs:
           python -m py_compile proxy/app.py proxy/recommend.py proxy/publicplaylists.py proxy/env_merge.py proxy/version.py
           lxmusic-service/app.py lxmusic-service/lxserver_client.py lxmusic-service/verify_source.py
           musicdl-service/app.py musicdl-service/hardening.py
-          musicbox-service/app.py musicbox-service/runner.py musicbox-service/netease_ext.py musicbox-service/playback.py
+          qqmusic-service/app.py qqmusic-service/qqmusic.py qqmusic-service/login.py
           webui-service/app.py
 
       # 服务各用独立解释器，避免 app/conftest/环境变量污染；仅服务之间限2并行。

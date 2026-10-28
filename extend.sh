@@ -18,14 +18,13 @@ UPSTREAM_SOCK="/var/run/trim_music_upstream.socket"
 MUSICDL_URL="http://127.0.0.1:8768"
 MUSICBOX_URL="http://127.0.0.1:8770"
 LX_URL="http://127.0.0.1:8772"
-QQ_URL="http://127.0.0.1:8776"
 FORCE_RELOAD=0
 ADOPT=0
 
 for arg in "$@"; do
     case "${arg}" in
         --qr)
-            bash "${BASE_DIR}/netease_login.sh"
+            log_info "QQ 音乐扫码请在管理页完成：飞牛桌面「fnMusic 扩展管理」→ 音乐源 → QQ 音乐"
             exit 0
             ;;
         --force)
@@ -148,16 +147,13 @@ FNMUSIC_VERSION="${FNMUSIC_VERSION:-0.0.0}"
 MUSICDL_URL="${FNMUSIC_MUSICDL_URL:-${MUSICDL_URL}}"
 MUSICBOX_URL="${FNMUSIC_MUSICBOX_URL:-${MUSICBOX_URL}}"
 LX_URL="${FNMUSIC_LX_URL:-${LX_URL}}"
-QQ_URL="${FNMUSIC_QQ_URL:-${QQ_URL}}"
 ENABLE_MUSICDL=0
 ENABLE_MUSICBOX=0
 ENABLE_LX=0
-ENABLE_QQ=0
 ENABLE_WEBUI=0
 is_enabled "${FNMUSIC_MUSICDL_ENABLED:-true}" && ENABLE_MUSICDL=1
 is_enabled "${FNMUSIC_NETEASE_ENABLED:-true}" && ENABLE_MUSICBOX=1
 is_enabled "${FNMUSIC_LX_ENABLED:-false}" && ENABLE_LX=1
-is_enabled "${FNMUSIC_QQ_ENABLED:-false}" && ENABLE_QQ=1
 is_enabled "${FNMUSIC_WEBUI_ENABLED:-false}" && ENABLE_WEBUI=1
 # 部署形态（v2.8.0a+）：docker（默认，单容器）| native（宿主机 systemd + supervisord）
 DEPLOY_MODE="${FNMUSIC_DEPLOY_MODE:-docker}"
@@ -168,9 +164,8 @@ case "${DEPLOY_MODE}" in
         exit 1
         ;;
 esac
-if [ "${ENABLE_MUSICDL}" -eq 0 ] && [ "${ENABLE_MUSICBOX}" -eq 0 ] \
-    && [ "${ENABLE_LX}" -eq 0 ] && [ "${ENABLE_QQ}" -eq 0 ]; then
-    log_err "至少需要启用一个音源（FNMUSIC_MUSICDL_ENABLED / FNMUSIC_NETEASE_ENABLED / FNMUSIC_LX_ENABLED / FNMUSIC_QQ_ENABLED）。"
+if [ "${ENABLE_MUSICDL}" -eq 0 ] && [ "${ENABLE_MUSICBOX}" -eq 0 ] && [ "${ENABLE_LX}" -eq 0 ]; then
+    log_err "至少需要启用一个音源（FNMUSIC_MUSICDL_ENABLED / FNMUSIC_NETEASE_ENABLED / FNMUSIC_LX_ENABLED）。"
     exit 1
 fi
 
@@ -344,16 +339,6 @@ try:
 except Exception:
     pass" 2>/dev/null || true
             done
-        elif [ "${source}" = "qqmusic" ]; then
-            curl -s --max-time 20 "${QQ_URL}/api/v1/search?keyword=${encoded}&limit=3" 2>/dev/null | python3 -c "import sys,json
-try:
-    d=json.load(sys.stdin)
-    rows=d.get('data') if isinstance(d, dict) else None
-    for it in (rows or [])[:3]:
-        sid=str(it.get('song_id') or it.get('id') or '')
-        if sid: print('qqmusic:'+sid)
-except Exception:
-    pass" 2>/dev/null || true
         else
             curl -s --max-time 20 "${MUSICBOX_URL}/api/v1/search?keyword=${encoded}&limit=3&type=song" 2>/dev/null | python3 -c "import sys,json
 try:
@@ -373,7 +358,6 @@ except Exception:
     [ "${ENABLE_MUSICDL}" -eq 1 ] && sources+=("musicdl")
     [ "${ENABLE_MUSICBOX}" -eq 1 ] && sources+=("musicbox")
     [ "${ENABLE_LX}" -eq 1 ] && sources+=("lxmusic")
-    [ "${ENABLE_QQ}" -eq 1 ] && sources+=("qqmusic")
 
     local src kw id
     for src in "${sources[@]}"; do
@@ -471,7 +455,6 @@ need_start=0
 if [ "${ENABLE_MUSICDL}" -eq 1 ] && ! source_healthy "${MUSICDL_URL}"; then need_start=1; fi
 if [ "${ENABLE_MUSICBOX}" -eq 1 ] && ! source_healthy "${MUSICBOX_URL}"; then need_start=1; fi
 if [ "${ENABLE_LX}" -eq 1 ] && ! source_healthy "${LX_URL}"; then need_start=1; fi
-if [ "${ENABLE_QQ}" -eq 1 ] && ! source_healthy "${QQ_URL}"; then need_start=1; fi
 if [ "${ENABLE_WEBUI}" -eq 1 ] && ! source_healthy "http://127.0.0.1:8774"; then need_start=1; fi
 
 # --- 原生形态：确保 unit 已安装、运行时依赖齐备，并按需重启对齐代码/.env ---
@@ -574,9 +557,6 @@ if [ "${ENABLE_MUSICDL}" -eq 1 ]; then
 fi
 if [ "${ENABLE_LX}" -eq 1 ]; then
     wait_source "lxmusic" "${LX_URL}" || exit 1
-fi
-if [ "${ENABLE_QQ}" -eq 1 ]; then
-    wait_source "qqmusic" "${QQ_URL}" || exit 1
 fi
 if [ "${ENABLE_WEBUI}" -eq 1 ]; then
     wait_source "WebUI" "http://127.0.0.1:8774" || exit 1
@@ -702,7 +682,7 @@ log_info "   点击在线源歌曲试听，确认可以流畅播放并显示歌�
 if [ "${ENABLE_MUSICBOX}" -eq 1 ]; then
     log_info "2. 网易云扫码登录（可选）："
     log_info "   若遇到部分网易云 VIP/无损歌曲需登录："
-    log_info "   • 命令行扫码登录（推荐）: ./extend.sh --qr 或 ./netease_login.sh"
+    log_info "   • 扫码登录（推荐）: 管理页「音乐源 → QQ 音乐」生成二维码，手机 QQ 扫码"
     log_info "     （自动展示二维码、轮询登录状态、过期自动刷新，支持随时 Ctrl+C 跳过）"
     log_info "   • 管理页内扫码：飞牛管理员打开「fnMusic 扩展管理」后在「音乐源」扫码"
     log_info "   • 本机查询登录状态: curl -s http://127.0.0.1:8770/api/v1/auth/status"
@@ -710,11 +690,6 @@ fi
 log_info "3. 健康检查与运维："
 log_info "   • 探测状态: curl -s --unix-socket /var/run/trim_music.socket http://localhost/_ext/healthz"
 log_info "   • 查看日志: sudo journalctl -u fnmusic-ext -f"
-if [ "${ENABLE_QQ}" -eq 1 ]; then
-    log_info "2b. QQ 音乐扫码登录（必须，否则只能搜索不能播放）："
-    log_info "   飞牛桌面「fnMusic 扩展管理」→ 音乐源 → QQ 音乐 → 生成二维码，用手机 QQ 扫码"
-    log_info "   扫码不通时用同页「Cookie 登录」粘贴 y.qq.com 的 uin / qm_keyst 兜底"
-fi
 if [ "${ENABLE_WEBUI}" -eq 1 ]; then
     log_info "   • 管理 WebUI: 飞牛桌面「fnMusic 扩展管理」（仅管理员；音源四选一/音质/推荐/LLM 运行期可调）"
 fi

@@ -8,7 +8,7 @@ const APP_BASE = "/app/fnmusic-ext";
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => Array.from(document.querySelectorAll(sel));
 
-const PROVIDER_LABEL = { musicdl: "musicdl 聚合音源", musicbox: "网易云音乐盒子", lxmusic: "洛雪自定义源", qqmusic: "QQ 音乐", none: "未配置" };
+const PROVIDER_LABEL = { musicdl: "musicdl 聚合音源", musicbox: "QQ 音乐", lxmusic: "洛雪自定义源", none: "未配置" };
 const PROC_LABEL = { musicdl: "musicdl", musicbox: "musicbox", lxserver: "lxserver", lxmusic: "lxmusic", webui: "WebUI" };
 
 let configValues = {};   // GET /api/config 的 values
@@ -274,11 +274,10 @@ function applyConfigToForm() {
   const provider = v.FNMUSIC_NETEASE_ENABLED === "true" ? "musicbox"
     : v.FNMUSIC_MUSICDL_ENABLED === "true" ? "musicdl"
     : v.FNMUSIC_LX_ENABLED === "true" ? "lxmusic"
-    : v.FNMUSIC_QQ_ENABLED === "true" ? "qqmusic" : "";
+    : "";
   $$("input[name=provider]").forEach((el) => { el.checked = el.value === provider; });
   syncProviderPanels(provider);
-  if (provider === "musicbox") syncNeteaseAccount();
-  if (provider === "qqmusic") syncQqAccount();
+  if (provider === "musicbox") syncQqAccount();
   const quality = v.FNMUSIC_QUALITY_MODE || "high";
   $$("input[name=quality]").forEach((el) => { el.checked = el.value === quality; });
   const dlQuality = v.FNMUSIC_DL_QUALITY || "app";
@@ -322,8 +321,6 @@ function applyConfigToForm() {
   $("#search-timeout").value = v.FNMUSIC_SEARCH_TIMEOUT || "15";
   $("#search-deep").checked = v.FNMUSIC_SEARCH_DEEP_PAGE !== "false";
   $("#search-deep-max").value = v.FNMUSIC_SEARCH_DEEP_MAX_PAGES || "10";
-  $("#netease-my-playlists").checked = v.FNMUSIC_NETEASE_MY_PLAYLISTS === "true";
-  $("#netease-playlist-resident").checked = v.FNMUSIC_NETEASE_PLAYLIST_RESIDENT === "true";
   $("#lx-url").value = "";
   lxVerifiedUrl = null;
   try {
@@ -353,7 +350,6 @@ function collectConfig() {
     FNMUSIC_MUSICDL_ENABLED: provider === "musicdl",
     FNMUSIC_NETEASE_ENABLED: provider === "musicbox",
     FNMUSIC_LX_ENABLED: provider === "lxmusic",
-    FNMUSIC_QQ_ENABLED: provider === "qqmusic",
     FNMUSIC_QUALITY_MODE: ($$("input[name=quality]").find((el) => el.checked) || {}).value || "high",
     FNMUSIC_DL_QUALITY: ($$("input[name=dl-quality]").find((el) => el.checked) || {}).value || "app",
     FNMUSIC_RECOMMEND_HOT: $("#recommend-hot").checked,
@@ -381,8 +377,6 @@ function collectConfig() {
     FNMUSIC_SEARCH_TIMEOUT: parseInt($("#search-timeout").value || "15", 10) || 15,
     FNMUSIC_SEARCH_DEEP_PAGE: $("#search-deep").checked,
     FNMUSIC_SEARCH_DEEP_MAX_PAGES: parseInt($("#search-deep-max").value || "10", 10) || 10,
-    FNMUSIC_NETEASE_MY_PLAYLISTS: $("#netease-my-playlists").checked,
-    FNMUSIC_NETEASE_PLAYLIST_RESIDENT: $("#netease-playlist-resident").checked,
     LX_SOURCE_LIST: JSON.stringify(lxSourceList),
   };
   // 隐藏的参数不提交：关闭用途不清空已保存值，也不让隐藏的无效编辑阻塞保存。
@@ -497,7 +491,7 @@ function savedProvider() {
   return v.FNMUSIC_NETEASE_ENABLED === "true" ? "musicbox"
     : v.FNMUSIC_MUSICDL_ENABLED === "true" ? "musicdl"
     : v.FNMUSIC_LX_ENABLED === "true" ? "lxmusic"
-    : v.FNMUSIC_QQ_ENABLED === "true" ? "qqmusic" : "";
+    : "";
 }
 
 // 点选未启用的音源：临时拉起其进程供预览（不写配置；5 分钟内未保存自动停止）
@@ -518,16 +512,14 @@ async function startPreview(provider) {
 
 function syncProviderPanels(provider) {
   $$(".provider-card").forEach((el) => el.classList.toggle("selected", el.dataset.provider === provider));
-  $("#panel-musicbox").hidden = provider !== "musicbox";
   $("#panel-musicdl").hidden = provider !== "musicdl";
   $("#panel-lxmusic").hidden = provider !== "lxmusic";
-  $("#panel-qqmusic").hidden = provider !== "qqmusic";
+  $("#panel-qqmusic").hidden = provider !== "musicbox";
 }
 $$("input[name=provider]").forEach((el) =>
   el.addEventListener("change", async () => {
     syncProviderPanels(el.value);
-    if (el.value === "musicbox") syncNeteaseAccount();
-    if (el.value === "qqmusic") syncQqAccount();
+    if (el.value === "musicbox") syncQqAccount();
     markDirty("音源切换需保存后生效");
     if (el.value && el.value !== savedProvider() && await startPreview(el.value)) {
       if (el.value === "musicdl") await loadPlatforms(false);
@@ -1207,100 +1199,6 @@ $("#public-next").addEventListener("click", async () => {
   }
 });
 
-/* -------------------------------------------------------------- 网易扫码 */
-let neteaseLoggedIn = false;
-
-function updateResidentAvailability() {
-  // 账号歌单仍需登录；公共网易歌单可匿名常驻，因此仅在两者都无需求时置灰。
-  const publicNeedsMusicbox = $("#public-playlists-enabled").checked
-    && publicSelection.some((item) => item.provider === "musicbox");
-  $("#netease-playlist-resident").disabled = !neteaseLoggedIn && !publicNeedsMusicbox;
-}
-
-async function syncNeteaseAccount(retries = 0) {
-  // 把网易账号态同步到 #qr-check（已登录显示昵称；未登录/失败清空），
-  // 同时驱动「网易云歌单常驻」复选框的可用态
-  neteaseLoggedIn = false;
-  updateResidentAvailability();
-  for (let i = 0; ; i++) {
-    try {
-      const st = await api("/api/netease/auth/status");
-      const d = st.data || st;
-      if (d.logged_in) {
-        neteaseLoggedIn = true;
-        $("#qr-check").textContent = `当前登录：${d.nickname || d.user_id || "已登录用户"}`;
-        break;
-      }
-    } catch (_) { /* status 不可达视为未登录 */ }
-    if (i >= retries) break;
-    await new Promise((r) => setTimeout(r, 1500));
-  }
-  updateResidentAvailability();
-}
-
-async function startQrLogin() {
-  stopQrPolling();
-  $("#qr-status").textContent = "正在生成二维码…";
-  $("#qr-img").hidden = true;
-  syncNeteaseAccount(); // 生成前同步当前账号态（非致命，不阻塞出码）
-  const callLogin = () => api("/api/netease/auth/login", { method: "POST" });
-  try {
-    let data;
-    try {
-      data = await callLogin();
-    } catch (exc) {
-      // musicbox 进程未运行（未点选/预览过期）：临时拉起后重试一次
-      if (!await startPreview("musicbox")) throw exc;
-      data = await callLogin();
-    }
-    const unikey = data.unikey || data.codekey || (data.data && (data.data.unikey || data.data.codekey)) || "";
-    if (!unikey) throw new Error("未获取到 unikey");
-    $("#qr-img").src = `${APP_BASE}/api/netease/qr?unikey=${encodeURIComponent(unikey)}`;
-    $("#qr-img").hidden = false;
-    $("#qr-status").textContent = "请用手机网易云音乐 App 扫码";
-    pollQr(unikey);
-  } catch (exc) {
-    $("#qr-status").textContent = "生成失败：" + exc.message;
-  }
-}
-
-async function checkQrStatus(unikey) {
-  const st = await api(`/api/netease/auth/login/check?unikey=${encodeURIComponent(unikey)}`);
-  // musicbox CLI 返回 {ok, data:{code}} 信封结构；兼容扁平 {code}
-  const code = st?.data?.code ?? st?.code;
-  if (code === 803) {
-    stopQrPolling();
-    $("#qr-status").textContent = "登录成功 ✓";
-    syncNeteaseAccount(2); // 803 后 cookie 落盘需要一点时间，带重试取昵称
-    toast("网易账号登录成功", "ok");
-  } else if (code === 802) {
-    $("#qr-status").textContent = "已扫码，请在手机上确认";
-  } else if (code === 800) {
-    stopQrPolling();
-    $("#qr-status").textContent = "二维码已过期，请重新生成";
-  } else {
-    $("#qr-status").textContent = "等待扫码…";
-  }
-}
-
-function pollQr(unikey, intervalMs = 2000) {
-  stopQrPolling();
-  qrTimer = setInterval(() => { checkQrStatus(unikey).catch(() => {}); }, intervalMs);
-}
-
-function stopQrPolling() {
-  if (qrTimer) { clearInterval(qrTimer); qrTimer = null; }
-}
-$("#qr-btn").addEventListener("click", startQrLogin);
-
-$("#netease-playlist-resident").addEventListener("change", () => {
-  // 常驻为账号/公共歌单供数；仅在没有公共选择时自动带出账号歌单开关。
-  const publicNeedsMusicbox = publicSelection.some((item) => item.provider === "musicbox");
-  if ($("#netease-playlist-resident").checked && !$("#netease-my-playlists").checked && !publicNeedsMusicbox) {
-    $("#netease-my-playlists").checked = true;
-  }
-});
-
 /* -------------------------------------------------------------- QQ 音乐扫码 */
 // QQ 音源的轮询状态码与网易盒子对齐：800 过期 / 801 待扫 / 802 待确认 / 803 成功，
 // 因此这里直接复用上面那套"出码 → 轮询 → 成功后同步账号态"的流程。
@@ -1356,7 +1254,7 @@ async function startQqQrLogin() {
       resp = await callLogin();
     } catch (exc) {
       // QQ 音源进程未运行（未点选/预览过期）：临时拉起后重试一次
-      if (!await startPreview("qqmusic")) throw exc;
+      if (!await startPreview("musicbox")) throw exc;
       resp = await callLogin();
     }
     const d = resp.data || resp;
@@ -1794,8 +1692,11 @@ if ($("#lx-name")) {
 }
 $$("input[name=quality]").forEach((el) => el.addEventListener("change", () => markDirty("音质偏好需保存后生效")));
 $$("input[name=dl-quality]").forEach((el) => el.addEventListener("change", () => markDirty("下载音质需保存后生效")));
-["#recommend-hot", "#recommend-daily", "#search-deep", "#tee-enabled", "#fav-autobind", "#auto-cover", "#lyric-auto-dl", "#netease-my-playlists", "#netease-playlist-resident"].forEach((sel) =>
-  $(sel).addEventListener("change", () => markDirty()));
+["#recommend-hot", "#recommend-daily", "#search-deep", "#tee-enabled", "#fav-autobind", "#auto-cover", "#lyric-auto-dl"].forEach((sel) => {
+  // 元素可能不存在（例如已删除的网易歌单开关），先判空避免整页脚本报错
+  const el = $(sel);
+  if (el) el.addEventListener("change", () => markDirty());
+});
 
 function updateTeeCountLabel() {
   const n = $("#tee-max").value || configValues.FNMUSIC_TEE_CACHE_MAX || "2";

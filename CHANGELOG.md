@@ -5,6 +5,34 @@
 
 ## [Unreleased]
 
+## [2.11.5] - 2026-10-28
+
+### 变更（按用户要求：移除网易云，QQ 音乐取而代之）
+- **删除网易云音乐音源**：`musicbox-service/`（NetEase 服务实现）、`netease_login.sh`（命令行扫码）、
+  管理页「网易云扫码登录 / 网易账号歌单 / 歌单常驻」面板与开关、`FNMUSIC_QQ_*` 独立开关一并移除。
+- **QQ 音乐直接占用 `musicbox` 槽位**：进程名、容器内端口 8002、宿主 8770、代理的网易协议适配全部沿用。
+  - 镜像里 QQ 服务落在 `/srv/musicbox-service`；compose 额外挂载 `./qqmusic-service:/srv/musicbox-service:ro`，
+    连旧镜像（进程表只有 `[program:musicbox]`）也能直接跑起 QQ。
+  - 独立 `[program:qqmusic]`、8776 端口、`FNMUSIC_QQ_ENABLED` 全部下线。
+- `install.sh --sources qqmusic` 现在映射到该槽位（`musicbox` 保留为历史别名）；向导改为三选一。
+- 管理页音源卡片「网易云音乐盒子」→「QQ 音乐」，扫码/状态/Cookie 兜底沿用已实现的 QQ 流程。
+- 修复代理启动崩溃：`FNMUSIC_QQ_SEARCH_LIMIT` 为空或非数字时 `int("")` 抛异常导致代理起不来
+  （表现为 systemd 反复重启 → 安装报「部署失败/中断」回滚），改为容错解析。
+
+## [2.11.5] - 2026-10-28
+
+### 变更（按用户要求：移除网易云，QQ 音乐取而代之）
+- **删除网易云音乐音源**：`musicbox-service/`（NetEase 服务实现）、`netease_login.sh`（命令行扫码）、
+  管理页「网易云扫码登录 / 网易账号歌单 / 歌单常驻」面板与开关、`FNMUSIC_QQ_*` 独立开关一并移除。
+- **QQ 音乐直接占用 `musicbox` 槽位**：进程名、容器内端口 8002、宿主 8770、代理的网易协议适配全部沿用。
+  - 镜像里 QQ 服务落在 `/srv/musicbox-service`；compose 额外挂载 `./qqmusic-service:/srv/musicbox-service:ro`，
+    连旧镜像（进程表只有 `[program:musicbox]`）也能直接跑起 QQ。
+  - 独立 `[program:qqmusic]`、8776 端口、`FNMUSIC_QQ_ENABLED` 全部下线。
+- `install.sh --sources qqmusic` 现在映射到该槽位（`musicbox` 保留为历史别名）；向导改为三选一。
+- 管理页音源卡片「网易云音乐盒子」→「QQ 音乐」，扫码/状态/Cookie 兜底沿用已实现的 QQ 流程。
+- 修复代理启动崩溃：`FNMUSIC_QQ_SEARCH_LIMIT` 为空或非数字时 `int("")` 抛异常导致代理起不来
+  （表现为 systemd 反复重启 → 安装报「部署失败/中断」回滚），改为容错解析。
+
 ## [2.11.4] - 2026-10-28
 
 ### 修复

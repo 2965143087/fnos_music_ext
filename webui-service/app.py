@@ -108,7 +108,6 @@ PROVIDERS = {
     "musicdl": "FNMUSIC_MUSICDL_ENABLED",
     "musicbox": "FNMUSIC_NETEASE_ENABLED",
     "lxmusic": "FNMUSIC_LX_ENABLED",
-    "qqmusic": "FNMUSIC_QQ_ENABLED",
 }
 
 # WebUI 可管理的配置键与元数据（kind/default/reload 驱动前端渲染与校验）。
@@ -117,7 +116,6 @@ SCHEMA: dict[str, dict] = {
     "FNMUSIC_MUSICDL_ENABLED": {"kind": "bool", "default": "false", "group": "provider", "reload": "process", "label": "musicdl 聚合音源"},
     "FNMUSIC_NETEASE_ENABLED": {"kind": "bool", "default": "false", "group": "provider", "reload": "process", "label": "网易云音乐盒子"},
     "FNMUSIC_LX_ENABLED": {"kind": "bool", "default": "false", "group": "provider", "reload": "process", "label": "洛雪自定义源"},
-    "FNMUSIC_QQ_ENABLED": {"kind": "bool", "default": "false", "group": "provider", "reload": "process", "label": "QQ 音乐"},
     "FNMUSIC_ONLINE_SOURCES": {"kind": "csv", "default": "", "group": "musicdl", "reload": "process", "label": "musicdl 启用平台"},
     "MUSICDL_SOURCES": {"kind": "csv", "default": "", "group": "musicdl", "reload": "process", "label": "musicdl 服务白名单（联动）"},
     "LX_SOURCE_URL": {"kind": "str", "default": "", "group": "lx", "reload": "process", "label": "洛雪源脚本地址（http(s) URL 或 file:// 上传地址）"},
@@ -243,11 +241,10 @@ PROVIDER_PROGRAMS = {
     "musicdl": ["musicdl"],
     "musicbox": ["musicbox"],
     "lxmusic": ["lxserver", "lxmusic"],
-    "qqmusic": ["qqmusic"],
 }
-PROVIDER_PROGRAM = {"musicdl": "musicdl", "musicbox": "musicbox", "lxmusic": "lxmusic", "qqmusic": "qqmusic"}  # 兼容单名引用
+PROVIDER_PROGRAM = {"musicdl": "musicdl", "musicbox": "musicbox", "lxmusic": "lxmusic"}  # 兼容单名引用
 PROVIDER_HEALTH = {"musicdl": CONF["musicdl_url"], "musicbox": CONF["musicbox_url"],
-                   "lxmusic": CONF["lx_url"], "qqmusic": CONF["qq_url"]}
+                   "lxmusic": CONF["lx_url"]}
 
 
 def switch_provider_process(old: str, new: str, keep_musicbox: bool = False) -> list[dict]:
@@ -1169,7 +1166,7 @@ async def api_preview(body: PreviewBody, request: Request):
     """点选未启用的音源卡片：临时拉起进程供预览（不写 .env，倒计时自动停止）。"""
     provider = body.provider
     if provider not in PROVIDERS:
-        raise HTTPException(status_code=400, detail="provider 必须是 musicdl/musicbox/lxmusic/qqmusic 之一")
+        raise HTTPException(status_code=400, detail="provider 必须是 musicdl/musicbox(QQ 音乐)/lxmusic 之一")
     if provider == "lxmusic":
         enabled = current_provider(read_env()) == provider
         ready = await _lx_ensure_ready(request, preview=not enabled)
@@ -1740,8 +1737,8 @@ async def qq_auth_proxy(path: str, request: Request):
     """
     if path not in ("login", "login/check", "status", "logout", "cookie"):
         raise HTTPException(status_code=404, detail="unknown auth endpoint")
-    preview_renew("qqmusic")  # 扫码期间视为活跃，续期预览进程
-    target = f"{CONF['qq_url']}/api/v1/auth/{path}"
+    preview_renew("musicbox")  # 扫码期间视为活跃，续期预览进程
+    target = f"{CONF['musicbox_url']}/api/v1/auth/{path}"
     body = await request.body() if request.method in ("POST", "PUT") else b""
     headers = {}
     if body:
@@ -1774,7 +1771,7 @@ async def qq_qr(request: Request, unikey: str = Query("")):
     """二维码图片直出（PNG 由 QQ 官方 ptqrshow 下发，转成 base64 也可以走 login 接口）。"""
     try:
         resp = await get_http(request).get(
-            f"{CONF['qq_url']}/api/v1/auth/login/qr.png",
+            f"{CONF['musicbox_url']}/api/v1/auth/login/qr.png",
             params={"unikey": unikey.strip()},
             timeout=30.0,
         )

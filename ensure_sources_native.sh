@@ -77,7 +77,6 @@ log_err() { echo -e "\033[31m[ERROR]\033[0m $*" >&2; }
 # ---------------------------------------------------------------- 1. venv + pip
 REQ_FILES=(
     "${BASE_DIR}/musicdl-service/requirements.txt"
-    "${BASE_DIR}/musicbox-service/requirements.txt"
     "${BASE_DIR}/lxmusic-service/requirements.txt"
     "${BASE_DIR}/webui-service/requirements.txt"
     "${BASE_DIR}/qqmusic-service/requirements.txt"

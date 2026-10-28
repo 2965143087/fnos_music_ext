@@ -33,7 +33,7 @@ PHASES = (
 )
 SUITES = {name: paths for phase in PHASES for name, paths in phase.items()}
 COVERAGE_TARGETS = (
-    "proxy", "lxmusic-service", "musicdl-service", "musicbox-service", "webui-service",
+    "proxy", "lxmusic-service", "musicdl-service", "webui-service",
     "qqmusic-service",
 )
 

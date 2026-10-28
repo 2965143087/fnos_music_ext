@@ -110,6 +110,24 @@ def _safe_liked_number(raw: str, default: float | int, *, integer: bool = False)
         return default
 
 
+def _env_int(raw: str | None, default: int, *, minimum: int | None = None,
+             maximum: int | None = None) -> int:
+    """解析整型环境变量：空串/非法值回落到默认值。
+
+    环境变量为空时 int("") 会抛 ValueError，若发生在模块级 CONF 构建里，
+    代理进程会启动即崩（systemd 反复重启 → 安装报"部署失败/中断"回滚）。
+    """
+    try:
+        value = int(str(raw).strip())
+    except (TypeError, ValueError):
+        return default
+    if minimum is not None and value < minimum:
+        return default
+    if maximum is not None and value > maximum:
+        return default
+    return value
+
+
 CONF = {
     "musicdl_url": os.environ.get("FNMUSIC_MUSICDL_URL", "http://127.0.0.1:8768"),
     "musicbox_url": os.environ.get("FNMUSIC_MUSICBOX_URL", "http://127.0.0.1:8770"),
@@ -121,7 +139,9 @@ CONF = {
     "netease_enabled": os.environ.get("FNMUSIC_NETEASE_ENABLED", "false").strip().lower() in ("true", "1", "yes"),
     "lx_enabled": os.environ.get("FNMUSIC_LX_ENABLED", "false").strip().lower() in ("true", "1", "yes"),
     "qq_enabled": os.environ.get("FNMUSIC_QQ_ENABLED", "false").strip().lower() in ("true", "1", "yes"),
-    "qq_search_limit": max(1, int(os.environ.get("FNMUSIC_QQ_SEARCH_LIMIT", "20"))),
+    # 容错：空串/非数字一律回落默认值。历史上这里 int("") 会让代理启动即崩，
+    # 表现为 systemd 起不来 → "部署失败/中断"回滚。
+    "qq_search_limit": _env_int(os.environ.get("FNMUSIC_QQ_SEARCH_LIMIT"), 20, minimum=1),
     "qq_quality": os.environ.get("FNMUSIC_QQ_QUALITY", "lossless"),
     "lx_search_limit": int(os.environ.get("FNMUSIC_LX_SEARCH_LIMIT", "20")),
     "lx_quality": os.environ.get("FNMUSIC_LX_QUALITY", "lossless"),

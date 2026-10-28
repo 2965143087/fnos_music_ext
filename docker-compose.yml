@@ -31,7 +31,6 @@ services:
       - "127.0.0.1:8768:8001"  # musicdl（代理访问）
       - "127.0.0.1:8770:8002"  # musicbox（仅本机；扫码走已登录的 WebUI）
       - "127.0.0.1:8772:8003"  # lxmusic（代理访问）
-      - "127.0.0.1:8776:8006"  # qqmusic（QQ 音乐；仅本机，取链与扫码都经代理）
       - "127.0.0.1:8774:8004"  # WebUI（仅本机；浏览器走飞牛网关）
     volumes:
       - ./sources-data:/data
@@ -39,6 +38,8 @@ services:
       # 前端从部署目录挂载：静态页原本烤在镜像里，一旦镜像因故未重建，就会出现
       # "VERSION 已是新版、管理页还是三音源"。挂载后页面永远跟随当前代码。
       - ./webui-service/static:/srv/webui-service/static:ro
+      # QQ 音乐代码落到 musicbox 槽位：旧镜像（只有 [program:musicbox]）也能直接跑
+      - ./qqmusic-service:/srv/musicbox-service:ro
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "/usr/local/bin/healthcheck.sh"]

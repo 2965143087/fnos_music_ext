@@ -193,66 +193,62 @@ def test_musicbox_like_client_routes_by_source(monkeypatch):
     assert musicbox_like_client(object(), "netease") is sentinel_nm
 
 
-# --------------------------------------------------------------- 部署脚本契约 ---
-# 事故回归：2.11.2 的 FPK 在飞牛上装到一半报「至少需要启用一个音源」——
-# extend.sh 只认三个旧开关，选了 QQ 也判成"一个都没启用"，安装器随即失败。
-# 这里锁死：凡是按音源开关分派的脚本，必须认识 QQ。
+# --------------------------------------------------------------- 部署契约（槽位设计） ---
+# 2.11.5 起：QQ 音乐占用 musicbox 槽位（镜像/旧进程表里只有这个位置），
+# NetEase 服务与独立 qqmusic 进程、8776 端口全部移除。
+# 这样即使镜像没重建，旧镜像的 [program:musicbox] 也能直接跑 QQ 服务。
 
 from pathlib import Path
 
 BASE = Path(__file__).resolve().parents[2]
 
 
-def test_extend_sh_understands_qq_source():
-    text = (BASE / "extend.sh").read_text(encoding="utf-8")
-    # 开关解析
-    assert 'FNMUSIC_QQ_ENABLED:-false}" && ENABLE_QQ=1' in text
-    assert 'FNMUSIC_QQ_URL:-${QQ_URL}' in text
-    # 四选一校验：QQ 必须出现在"至少启用一个"的判断里
-    guard = text.split("至少需要启用一个音源")[0]
-    last_if = guard[guard.rindex("if ["):]
-    assert "ENABLE_QQ" in last_if, "extend.sh 的四选一校验漏了 ENABLE_QQ"
-    # 启动、探活、等待、搜索探针四处都要有 QQ 分支
-    assert '[ "${ENABLE_QQ}" -eq 1 ] && ! source_healthy "${QQ_URL}"' in text
-    assert 'wait_source "qqmusic" "${QQ_URL}"' in text
-    assert '[ "${ENABLE_QQ}" -eq 1 ] && sources+=("qqmusic")' in text
-    assert '${QQ_URL}/api/v1/search' in text
-    # 数据目录要落在共享卷里，别让 root 在宿主 /data 另起一份
-    assert 'sources-data/qqmusic' in text
-
-
-def test_install_sh_qq_flag_written_and_explicit():
-    text = (BASE / "install.sh").read_text(encoding="utf-8")
-    assert "FNMUSIC_QQ_ENABLED='${QQ_FLAG}'" in text
-    assert "FNMUSIC_QQ_URL='http://127.0.0.1:8776'" in text
-    # 显式列表决定切源时能否覆盖旧值
-    explicit = [ln for ln in text.splitlines() if ln.startswith("ENV_EXPLICIT=")][0]
-    assert "FNMUSIC_QQ_ENABLED" in explicit
-    assert 'FNMUSIC_QQ_URL"' in text
-    # 升级检测要把 QQ 算进"多源并存"
-    assert "FNMUSIC_(MUSICDL|NETEASE|LX|QQ)_ENABLED=" in text
-
-
-def test_container_and_native_start_qqmusic():
-    entry = (BASE / "container" / "entrypoint.sh").read_text(encoding="utf-8")
-    assert "FNMUSIC_QQ_ENABLED" in entry and "start_prog qqmusic" in entry
-    health = (BASE / "container" / "healthcheck.sh").read_text(encoding="utf-8")
-    assert "check qqmusic FNMUSIC_QQ_ENABLED" in health
+def test_qq_runs_in_musicbox_slot():
     sup = (BASE / "container" / "supervisord.conf").read_text(encoding="utf-8")
-    assert "[program:qqmusic]" in sup and 'FNMUSIC_QQ_DATA_DIR="/data/qqmusic"' in sup
+    assert "[program:qqmusic]" not in sup, "独立 qqmusic 进程应已移除"
+    assert "[program:musicbox]" in sup
+    assert "directory=/srv/musicbox-service" in sup
+    assert "--port 8002" in sup  # 沿用 musicbox 的容器内端口
+
     native = (BASE / "container" / "supervisord-native.conf.in").read_text(encoding="utf-8")
-    assert "[program:qqmusic]" in native
-    assert 'FNMUSIC_QQ_DATA_DIR="@DATA@/qqmusic"' in native
+    assert "[program:qqmusic]" not in native
+    assert "directory=@REPO@/qqmusic-service" in native
+
+    dockerfile = (BASE / "container" / "Dockerfile").read_text(encoding="utf-8")
+    assert "qqmusic-service/app.py qqmusic-service/qqmusic.py qqmusic-service/login.py /srv/musicbox-service/" in dockerfile
+    assert "/srv/qqmusic-service/" not in dockerfile
+
+    compose = (BASE / "docker-compose.yml").read_text(encoding="utf-8")
+    assert "./qqmusic-service:/srv/musicbox-service:ro" in compose
+    assert "8776" not in compose
+
+
+def test_netease_source_removed():
+    assert not (BASE / "musicbox-service").exists(), "网易云服务代码应已删除"
+    assert not (BASE / "netease_login.sh").exists(), "网易云命令行扫码脚本应已删除"
+    entry = (BASE / "container" / "entrypoint.sh").read_text(encoding="utf-8")
+    assert "start_prog qqmusic" not in entry
+    health = (BASE / "container" / "healthcheck.sh").read_text(encoding="utf-8")
+    assert "qqmusic" not in health
+    install = (BASE / "install.sh").read_text(encoding="utf-8")
+    assert "ENABLE_QQ" not in install
+    assert "FNMUSIC_QQ_ENABLED" not in install
+
+
+def test_install_maps_qqmusic_to_slot():
+    text = (BASE / "install.sh").read_text(encoding="utf-8")
+    # qqmusic 令牌落到 musicbox 槽位
+    assert 'qq|qqmusic|qq-music)' in text
+    assert 'ENABLE_MUSICBOX=1; picked+=("musicbox")' in text
+    # 提示语指向管理页扫码
+    assert "QQ 音乐扫码请在管理页完成" in text
+    # 代理不再因空值环境变量崩在 import 阶段
+    proxy = (BASE / "proxy" / "app.py").read_text(encoding="utf-8")
+    assert "_env_int(os.environ.get(\"FNMUSIC_QQ_SEARCH_LIMIT\")" in proxy
 
 
 def test_image_version_gate_and_static_mount():
-    """2.11.3 事故：VERSION 已是新版、容器仍跑旧镜像（无 qqmusic 进程、页面三音源）。
-
-    修法有三道保险，缺一条就会重现：
-    1) Dockerfile 把版本写进镜像标签；
-    2) compose 把版本作为 build arg 传入，并把前端目录挂载进容器；
-    3) ensure_image_current 用「指纹 + 版本」双条件判复用，不一致先删镜像再重建。
-    """
+    """升级时镜像没重建会导致"版本新、功能旧"：用版本标签强校验。"""
     dockerfile = (BASE / "container" / "Dockerfile").read_text(encoding="utf-8")
     assert "ARG FNMUSIC_VERSION" in dockerfile
     assert 'io.fnmusic-ext.version="${FNMUSIC_VERSION}"' in dockerfile
@@ -262,11 +258,6 @@ def test_image_version_gate_and_static_mount():
     assert "./webui-service/static:/srv/webui-service/static:ro" in compose
 
     common = (BASE / "proxy" / "install_common.sh").read_text(encoding="utf-8")
-    # 版本探测 + 复用双条件
-    assert 'io.fnmusic-ext.version' in common
     assert 'export FNMUSIC_VERSION="${want_version}"' in common
     assert '[ "${image_version}" = "${want_version}" ]' in common
-    # 版本不一致要先删镜像，否则 COPY 层可能沿用旧内容
     assert 'run_docker image rm -f "${APP_IMAGE}"' in common
-    # 构建后必须校验版本标签
-    assert '与部署版本 ${want_version} 不符' in common

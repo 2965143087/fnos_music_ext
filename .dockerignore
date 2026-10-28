@@ -1,7 +1,6 @@
 # 统一镜像构建上下文：只送五个服务目录 + container/，仓库其余内容（数据/缓存/密钥）不进镜像
 *
 !musicdl-service/
-!musicbox-service/
 !lxmusic-service/
 !qqmusic-service/
 !webui-service/

@@ -1,4 +1,4 @@
-; fnmusic-ext 原生（无 Docker）音源进程表：五个程序全部 autostart=false，
+; fnmusic-ext 原生（无 Docker）音源进程表：四个程序全部 autostart=false，
 ; 由 container/entrypoint.sh 按 .env 的启用开关 supervisorctl start（按需加载）。
 ; 与容器形态（container/supervisord.conf）一一对应，差异仅在：
 ;   1. 服务直接监听宿主发布端口 8768/8770/8772/8774（容器内为 8001-8004 由 docker 映射），
@@ -41,7 +41,8 @@ stdout_logfile_maxbytes=0
 redirect_stderr=true
 
 [program:musicbox]
-directory=@REPO@/musicbox-service
+; 槽位名沿用 musicbox，实际跑 QQ 音乐服务（代码在 @REPO@/qqmusic-service）
+directory=@REPO@/qqmusic-service
 command="@VENV@/bin/uvicorn" app:app --host 127.0.0.1 --port 8770
 autostart=false
 autorestart=true
@@ -80,19 +81,6 @@ stdout_logfile=@RUN@/lxmusic.log
 stdout_logfile_maxbytes=0
 redirect_stderr=true
 
-[program:qqmusic]
-directory=@REPO@/qqmusic-service
-command="@VENV@/bin/uvicorn" app:app --host 127.0.0.1 --port 8776
-autostart=false
-autorestart=true
-startretries=5
-stopsignal=TERM
-stopasgroup=true
-killasgroup=true
-stdout_logfile=@RUN@/qqmusic.log
-stdout_logfile_maxbytes=0
-redirect_stderr=true
-
 [program:webui]
 directory=@REPO@/webui-service
 command="@VENV@/bin/uvicorn" app:app --host 127.0.0.1 --port 8774
@@ -105,4 +93,4 @@ killasgroup=true
 stdout_logfile=@RUN@/webui.log
 stdout_logfile_maxbytes=0
 redirect_stderr=true
-environment=WEBUI_REPO_DIR="@REPO@",WEBUI_MUSICDL_URL="http://127.0.0.1:8768",WEBUI_MUSICBOX_URL="http://127.0.0.1:8770",WEBUI_LX_URL="http://127.0.0.1:8772",WEBUI_QQ_URL="http://127.0.0.1:8776",WEBUI_SUPERVISORCTL="supervisorctl -c @RUN@/supervisord.conf"
+environment=WEBUI_REPO_DIR="@REPO@",WEBUI_MUSICDL_URL="http://127.0.0.1:8768",WEBUI_MUSICBOX_URL="http://127.0.0.1:8770",WEBUI_LX_URL="http://127.0.0.1:8772",WEBUI_SUPERVISORCTL="supervisorctl -c @RUN@/supervisord.conf"
