@@ -204,18 +204,17 @@ def test_common_repo_dir_precedence(sb):
 
 
 def test_common_saved_source_priority(sb):
-    """.env 音源布尔→--sources：musicbox > qqmusic > lxmusic > musicdl，未配置为空。"""
+    """.env 音源布尔→--sources：musicbox > qqmusic > lxmusic，未配置为空。"""
     cases = [
         ("FNMUSIC_NETEASE_ENABLED=true\n", "musicbox"),
         ("FNMUSIC_QQMUSIC_ENABLED=true\n", "qqmusic"),
         ("FNMUSIC_LX_ENABLED=true\n", "lxmusic"),
-        ("FNMUSIC_MUSICDL_ENABLED=true\n", "musicdl"),
         # 多个并存取最高优先级，避免升级后源漂移
         ("FNMUSIC_NETEASE_ENABLED=true\nFNMUSIC_QQMUSIC_ENABLED=true\n"
-         "FNMUSIC_LX_ENABLED=true\nFNMUSIC_MUSICDL_ENABLED=true\n", "musicbox"),
+         "FNMUSIC_LX_ENABLED=true\n", "musicbox"),
         ("FNMUSIC_QQMUSIC_ENABLED=true\nFNMUSIC_LX_ENABLED=true\n", "qqmusic"),
-        ("FNMUSIC_LX_ENABLED=true\nFNMUSIC_MUSICDL_ENABLED=true\n", "lxmusic"),
-        ("FNMUSIC_MUSICDL_ENABLED=false\n", ""),
+        ("FNMUSIC_LX_ENABLED=true\n", "lxmusic"),
+        ("FNMUSIC_QQMUSIC_ENABLED=false\n", ""),
         ("", ""),
     ]
     script = (f'set -uo pipefail\nSELF_DIR="{sb.cmd}"\n. "{sb.cmd}/_common"\n'
@@ -328,15 +327,15 @@ def test_install_init_fails_when_docker_daemon_not_running(sb, tmp_path, held_so
 
 # -------------------------------------------------------- install_callback ---
 
-def test_install_callback_defaults_invalid_source_to_musicdl(sb):
+def test_install_callback_defaults_invalid_source_to_qqmusic(sb):
     sb.make_repo()
     result = sb.run("install_callback", wizard_sources="bogus", wizard_extend="true")
     assert result.returncode == 0, result.stderr
-    assert sb.install_args() == ["--non-interactive --sources musicdl --webui --adopt --extend"]
+    assert sb.install_args() == ["--non-interactive --sources qqmusic --webui --adopt --extend"]
 
 
 def test_install_callback_qqmusic_passthrough(sb):
-    """向导选 QQ 音乐时 --sources qqmusic 必须原样透传（不被回落成 musicdl）。"""
+    """向导选 QQ 音乐时 --sources qqmusic 必须原样透传（不被回落覆盖）。"""
     sb.make_repo()
     result = sb.run("install_callback", wizard_sources="qqmusic", wizard_extend="true")
     assert result.returncode == 0, result.stderr
@@ -383,7 +382,7 @@ def test_install_callback_install_failure_tails_log(sb):
     sb.make_repo()
     log = sb.pkgvar / "fnmusic-app.log"
     log.write_text("\n".join(f"line{i}" for i in range(1, 8)) + "\n", encoding="utf-8")
-    result = sb.run("install_callback", wizard_sources="musicdl",
+    result = sb.run("install_callback", wizard_sources="qqmusic",
                     STUB_INSTALL_RC="7")
     assert result.returncode == 1
     assert "安装失败" in result.stderr
@@ -402,7 +401,7 @@ def test_install_callback_install_failure_surfaces_error_lines(sb):
         "\033[31m[ERROR]\033[0m 洛雪源校验未通过（resolve）：源脚本解析失败\n"
         "\033[31m[ERROR]\033[0m 可更换源 URL 或勾选跳过校验\n",
         encoding="utf-8")
-    result = sb.run("install_callback", wizard_sources="musicdl",
+    result = sb.run("install_callback", wizard_sources="qqmusic",
                     STUB_INSTALL_RC="7")
     assert result.returncode == 1
     # 错误行进入 stderr（fnmusic_fail），tail 原始日志允许带色码
@@ -435,13 +434,13 @@ def test_install_callback_ignores_buildkit_run_title_with_error_echo(sb):
     log.write_text(
         "#18 [ 3/20] RUN set -eu;  fix_dns() { probe_host=\"deb.debian.org\"; "
         "echo \"[ERROR] apt 镜像源与官方源均未取到索引\"; }\n"
-        "\033[31m[ERROR]\033[0m 等待 musicdl healthz 超时\n",
+        "\033[31m[ERROR]\033[0m 等待 qqmusic healthz 超时\n",
         encoding="utf-8")
-    result = sb.run("install_callback", wizard_sources="musicdl",
+    result = sb.run("install_callback", wizard_sources="qqmusic",
                     STUB_INSTALL_RC="7")
     assert result.returncode == 1
     trim_log = (sb.tmp / "trim-log.txt").read_text(encoding="utf-8")
-    assert "等待 musicdl healthz 超时" in trim_log
+    assert "等待 qqmusic healthz 超时" in trim_log
     assert "fix_dns" not in trim_log
     assert "apt 镜像源" not in trim_log
 
@@ -453,7 +452,7 @@ echo "durable-marker"
 echo -e "\\033[31m[ERROR]\\033[0m 容器健康检查失败"
 exit 7
 """)
-    result = sb.run("install_callback", wizard_sources="musicdl", wizard_extend="false")
+    result = sb.run("install_callback", wizard_sources="qqmusic", wizard_extend="false")
     assert result.returncode == 1
     durable = sb.durable_log.read_text(encoding="utf-8")
     assert "durable-marker" in durable
@@ -465,7 +464,7 @@ exit 7
 
 
 def test_install_callback_requires_repo_payload(sb):
-    result = sb.run("install_callback", wizard_sources="musicdl")
+    result = sb.run("install_callback", wizard_sources="qqmusic")
     assert result.returncode == 1
     assert "应用文件缺失" in result.stderr
 
@@ -476,7 +475,7 @@ def test_install_callback_cleans_foreign_unit(sb):
     sb.add_systemctl()
     stale = sb.tmp / "stale-unit.service"
     stale.write_text("[Service]\nWorkingDirectory=/vol1/other/repo\n", encoding="utf-8")
-    result = sb.run("install_callback", wizard_sources="musicdl",
+    result = sb.run("install_callback", wizard_sources="qqmusic",
                     FNMUSIC_UNIT_FILE=str(stale))
     assert result.returncode == 0, result.stderr
     assert not stale.exists()
@@ -494,7 +493,7 @@ def test_install_callback_migrates_data_from_old_deployment(sb, tmp_path):
     dep_file.parent.mkdir(parents=True, exist_ok=True)
     dep_file.write_text(f'{{"base": "{old_repo}"}}\n', encoding="utf-8")
 
-    result = sb.run("install_callback", wizard_sources="musicdl",
+    result = sb.run("install_callback", wizard_sources="qqmusic",
                     FNMUSIC_DEPLOYMENT_FILE=str(dep_file))
     assert result.returncode == 0, result.stderr
     assert (repo / ".env").read_text(encoding="utf-8") == "OLD_KEY=old_value\n"
@@ -505,7 +504,7 @@ def test_install_callback_migrates_data_from_old_deployment(sb, tmp_path):
 
 def test_upgrade_init_backup_ignores_caller_cwd_env_bak(sb, tmp_path):
     """调用方 cwd 有 .env.bak* 时，tar 不得按 cwd 展开导致备份失败。"""
-    repo = sb.make_repo(env_text="FNMUSIC_MUSICDL_ENABLED=true\n")
+    repo = sb.make_repo(env_text="FNMUSIC_QQMUSIC_ENABLED=true\n")
     (repo / ".env.bak.20260101000000").write_text("X=0\n", encoding="utf-8")
     sb.add_data(repo)
     sb.add_systemctl()
@@ -602,7 +601,7 @@ def _make_backup(sb: Sandbox, repo: Path, env_text: str) -> None:
 
 
 def test_upgrade_callback_restores_backup_and_reinstalls_lx(sb):
-    repo = sb.make_repo(env_text="FNMUSIC_MUSICDL_ENABLED=true\n")  # 旧值，应被备份覆盖
+    repo = sb.make_repo(env_text="FNMUSIC_QQMUSIC_ENABLED=true\n")  # 旧值，应被备份覆盖
     _make_backup(sb, repo, "FNMUSIC_LX_ENABLED=true\nLX_SOURCE_URL=http://s/x.js\n")
     sb.add_data(repo)
     result = sb.run("upgrade_callback")
@@ -617,7 +616,7 @@ def test_upgrade_callback_restores_backup_and_reinstalls_lx(sb):
 
 
 def test_upgrade_callback_corrupt_backup_fails_and_keeps_it(sb):
-    repo = sb.make_repo(env_text="FNMUSIC_MUSICDL_ENABLED=true\n")
+    repo = sb.make_repo(env_text="FNMUSIC_QQMUSIC_ENABLED=true\n")
     backup = sb.pkgvar / "upgrade-backup"
     backup.mkdir()
     (backup / "data.tar.gz").write_bytes(b"not-a-tar")
@@ -648,10 +647,10 @@ def test_upgrade_callback_without_backup_uses_current_env(sb):
 
 
 def test_upgrade_callback_install_failure_keeps_backup(sb):
-    repo = sb.make_repo(env_text="FNMUSIC_MUSICDL_ENABLED=true\n")
+    repo = sb.make_repo(env_text="FNMUSIC_QQMUSIC_ENABLED=true\n")
     sb.add_data(repo)
     sb.add_docker()
-    _make_backup(sb, repo, "FNMUSIC_MUSICDL_ENABLED=true\n")
+    _make_backup(sb, repo, "FNMUSIC_QQMUSIC_ENABLED=true\n")
     result = sb.run("upgrade_callback", STUB_INSTALL_RC="9")
     assert result.returncode == 1
     assert "升级失败" in result.stderr
@@ -661,11 +660,11 @@ def test_upgrade_callback_install_failure_keeps_backup(sb):
     assert "rm -f fnmusic-sources" in sb.docker_log.read_text(encoding="utf-8")
 
 
-def test_upgrade_callback_defaults_to_musicdl_when_env_silent(sb):
+def test_upgrade_callback_defaults_to_qqmusic_when_env_silent(sb):
     sb.make_repo(env_text="SOME_OTHER_KEY=1\n")
     result = sb.run("upgrade_callback")
     assert result.returncode == 0, result.stderr
-    assert sb.install_args() == ["--non-interactive --sources musicdl --webui --extend --adopt"]
+    assert sb.install_args() == ["--non-interactive --sources qqmusic --webui --extend --adopt"]
 
 
 # ---------------------------------------------------------- uninstall_init ---

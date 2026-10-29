@@ -18,8 +18,8 @@ from proxy.app import (
     fake_official_guid,
 )
 
-FAKE_KUWO1 = "online:kuwo:228908"
-FAKE_KUWO2 = "online:kuwo:228909"
+FAKE_QQ1 = "online:qqmusic:228908"
+FAKE_QQ2 = "online:qqmusic:228909"
 PL_CUSTOM = "pl-custom-1"
 
 
@@ -28,7 +28,7 @@ def test_list_retry_never_downloads_across_batches(monkeypatch):
 
     monkeypatch.setitem(CONF, "fav_auto_bind", True)
     request = Request({"type": "http", "headers": []})
-    pending = [{"guid": f"online:kuwo:{number}", "bind": "pending"}
+    pending = [{"guid": f"online:qqmusic:{number}", "bind": "pending"}
                for number in range(20)]
     downloads = []
     bindings = []
@@ -75,12 +75,12 @@ def setup_fav_autobind_env(tmp_path, monkeypatch):
     monkeypatch.setitem(CONF, "fav_dir", fav_dir)
     monkeypatch.setitem(CONF, "cache_dir", cache_dir)
     monkeypatch.setitem(CONF, "library_dir", library_dir)
-    monkeypatch.setitem(CONF, "musicdl_enabled", True)
+    monkeypatch.setitem(CONF, "qqmusic_enabled", True)
     monkeypatch.setitem(CONF, "lyric_field", "data.lyric")
     monkeypatch.setattr(appmod, "_REGISTRY_WARMED", False)
     appmod._FAKE_GUID_REVERSE.clear()
 
-    # 默认 mock 上游与 musicdl 客户端，避免任何真实联网
+    # 默认 mock 上游与 qqmusic 客户端，避免任何真实联网
     def upstream_handler(request: httpx.Request) -> httpx.Response:
         if request.url.path.endswith("/user/me"):
             return httpx.Response(200, json={"code": 0, "msg": "ok", "data": {"guid": "user-a"}})
@@ -93,18 +93,17 @@ def setup_fav_autobind_env(tmp_path, monkeypatch):
         base_url="http://unix",
     )
 
-    def musicdl_handler(request: httpx.Request) -> httpx.Response:
-        if request.url.path == "/info":
-            return httpx.Response(200, json={
-                "ok": True, "id": "kuwo:228908", "source": "kuwo",
-                "title": "晴天", "artist": "周杰伦", "album": "叶惠美",
-                "duration_s": 269, "ext": "mp3",
-            })
+    def qqmusic_handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/info"):
+            return httpx.Response(200, json={"ok": True, "data": {
+                "song_name": "晴天", "artist": "周杰伦", "album_name": "叶惠美",
+                "duration": 269, "album_pic_url": "",
+            }})
         return httpx.Response(404)
 
-    app.state.musicdl_client = httpx.AsyncClient(
-        transport=httpx.MockTransport(musicdl_handler),
-        base_url="http://127.0.0.1:8768",
+    app.state.qqmusic_client = httpx.AsyncClient(
+        transport=httpx.MockTransport(qqmusic_handler),
+        base_url="http://127.0.0.1:8775",
     )
     app.state.musicbox_client = httpx.AsyncClient(
         transport=httpx.MockTransport(lambda r: httpx.Response(404, json={"ok": False})),
@@ -145,14 +144,14 @@ def test_scenario1_fav_autobind_disabled_no_task(monkeypatch):
     with TestClient(app) as client:
         resp = client.post(
             "/music/api/v1/favorite-track/create",
-            json={"trackGUID": FAKE_KUWO1},
+            json={"trackGUID": FAKE_QQ1},
             cookies={"music-token": "valid_token"},
         )
         assert resp.status_code == 200
         assert resp.json() == {"code": 0, "msg": "", "data": None}
 
     assert recorded == []
-    assert FAKE_KUWO1 not in appmod._full_fetch_tasks
+    assert FAKE_QQ1 not in appmod._full_fetch_tasks
 
 
 def test_scenario2_fav_autobind_enabled_registers_task(monkeypatch):
@@ -170,13 +169,13 @@ def test_scenario2_fav_autobind_enabled_registers_task(monkeypatch):
     with TestClient(app) as client:
         resp = client.post(
             "/music/api/v1/favorite-track/create",
-            json={"trackGUID": FAKE_KUWO1},
+            json={"trackGUID": FAKE_QQ1},
             cookies={"music-token": "valid_token"},
         )
         assert resp.status_code == 200
         assert resp.json() == {"code": 0, "msg": "", "data": None}
 
-    assert recorded == [FAKE_KUWO1]
+    assert recorded == [FAKE_QQ1]
 
 
 def test_scenario3_fav_autobind_skips_when_cached(monkeypatch):
@@ -193,7 +192,7 @@ def test_scenario3_fav_autobind_skips_when_cached(monkeypatch):
     with TestClient(app) as client:
         resp = client.post(
             "/music/api/v1/favorite-track/create",
-            json={"trackGUID": FAKE_KUWO1},
+            json={"trackGUID": FAKE_QQ1},
             cookies={"music-token": "valid_token"},
         )
         assert resp.status_code == 200
@@ -215,14 +214,14 @@ def test_scenario4_playlist_add_track_registered_for_online_only(monkeypatch):
 
     with TestClient(app) as client:
         # 分支 a：自建歌单添加在线歌曲 -> 触发注册
-        fake_guid = fake_official_guid(FAKE_KUWO1)
+        fake_guid = fake_official_guid(FAKE_QQ1)
         resp = client.post(
             "/music/api/v1/playlist/add-track",
             json={"guid": PL_CUSTOM, "trackGUIDs": [fake_guid]},
         )
         assert resp.status_code == 200
         assert resp.json() == {"code": 0, "msg": "", "data": None}
-        assert recorded == [FAKE_KUWO1]
+        assert recorded == [FAKE_QQ1]
 
         recorded.clear()
 
@@ -230,7 +229,7 @@ def test_scenario4_playlist_add_track_registered_for_online_only(monkeypatch):
         rec_guid = dailyrec.daily_playlist_guid("20260924", "user-a")
         resp_rec = client.post(
             "/music/api/v1/playlist/add-track",
-            json={"guid": rec_guid, "trackGUIDs": [fake_official_guid(FAKE_KUWO2)]},
+            json={"guid": rec_guid, "trackGUIDs": [fake_official_guid(FAKE_QQ2)]},
         )
         assert resp_rec.status_code == 200
         assert resp_rec.json() == {"code": 0, "msg": "", "data": None}
@@ -260,7 +259,7 @@ def test_fav_autobind_cooldown_and_dedup(monkeypatch):
     """进阶测试：失败冷却期内跳过注册；在途未完成任务去重。"""
     monkeypatch.setitem(CONF, "fav_auto_bind", True)
     now = time.monotonic()
-    appmod._full_fetch_failed[FAKE_KUWO1] = now
+    appmod._full_fetch_failed[FAKE_QQ1] = now
     recorded = []
 
     async def fake_download(guid, headers):
@@ -272,21 +271,21 @@ def test_fav_autobind_cooldown_and_dedup(monkeypatch):
         # 在冷却期内：跳过注册
         resp = client.post(
             "/music/api/v1/favorite-track/create",
-            json={"trackGUID": FAKE_KUWO1},
+            json={"trackGUID": FAKE_QQ1},
             cookies={"music-token": "valid_token"},
         )
         assert resp.status_code == 200
         assert recorded == []
 
         # 冷却期过期后：恢复注册
-        appmod._full_fetch_failed[FAKE_KUWO1] = now - _FULL_FETCH_COOLDOWN_S - 1.0
+        appmod._full_fetch_failed[FAKE_QQ1] = now - _FULL_FETCH_COOLDOWN_S - 1.0
         resp2 = client.post(
             "/music/api/v1/favorite-track/create",
-            json={"trackGUID": FAKE_KUWO1},
+            json={"trackGUID": FAKE_QQ1},
             cookies={"music-token": "valid_token"},
         )
         assert resp2.status_code == 200
-        assert recorded == [FAKE_KUWO1]
+        assert recorded == [FAKE_QQ1]
 
 
 def test_fav_autobind_hot_reload(tmp_path, monkeypatch):

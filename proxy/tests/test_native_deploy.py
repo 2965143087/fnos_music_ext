@@ -121,9 +121,9 @@ def test_webui_supervisorctl_accepts_args_in_command(monkeypatch, tmp_path):
         encoding="utf-8",
     )
     monkeypatch.setitem(webui.CONF, "supervisorctl", f"{sys.executable} {stub}")
-    code, out = webui.supervisorctl("status", "musicdl")
+    code, out = webui.supervisorctl("status", "qqmusic")
     assert code == 0
-    assert "status musicdl" in out
+    assert "status qqmusic" in out
 
 
 def test_webui_supervisorctl_default_single_word_unchanged(monkeypatch, tmp_path):
@@ -139,10 +139,10 @@ def test_webui_supervisorctl_default_single_word_unchanged(monkeypatch, tmp_path
 
 def test_native_supervisor_template_programs_and_ports():
     text = (BASE / "container" / "supervisord-native.conf.in").read_text(encoding="utf-8")
-    for program in ("musicdl", "musicbox", "lxserver", "lxmusic", "webui"):
+    for program in ("musicbox", "qqmusic", "lxserver", "lxmusic", "webui"):
         assert f"[program:{program}]" in text
     # 与容器发布端口一致（proxy 契约不变）；lxserver 保持回环 8005
-    for port in ("8768", "8770", "8772", "8774", "8005"):
+    for port in ("8775", "8770", "8772", "8774", "8005"):
         assert port in text
     assert "autostart=false" in text
     assert "FNMUSIC_ENV_FILE=\"@REPO@/.env\"" in text
@@ -261,7 +261,7 @@ def test_render_native_supervisor_conf_placeholders(tmp_path):
     assert r.returncode == 0
     out = r.stdout
     assert "@REPO@" not in out and "@VENV@" not in out and "@DATA@" not in out and "@RUN@" not in out
-    assert f"directory={tmp_path}/musicdl-service" in out
+    assert f"directory={tmp_path}/qqmusic-service" in out
     assert f"{tmp_path}/.venv-sources/bin/uvicorn" in out
     assert f"directory={tmp_path}/.lxserver" in out
     assert f"WEBUI_SUPERVISORCTL=\"supervisorctl -c '{tmp_path}/sources-native/supervisord.conf'\"" in out
@@ -287,7 +287,7 @@ def test_ensure_sources_native_lxserver_provision_idempotent(tmp_path):
     shutil.copy(BASE / "container/lxserver_compat.py", repo / "container/lxserver_compat.py")
     compat = _load_module("container/lxserver_compat.py", "native_provision_compat_test")
     upstream_api = "\n".join((compat.ANCHOR_BTOA, compat.ANCHOR_CALL_OLD, compat.ANCHOR_AES_OLD))
-    for req in ("musicdl-service", "musicbox-service", "qqmusic-service", "lxmusic-service", "webui-service"):
+    for req in ("musicbox-service", "qqmusic-service", "lxmusic-service", "webui-service"):
         (repo / req).mkdir()
         (repo / req / "requirements.txt").write_text("fastapi\n", encoding="utf-8")
     # 预置包：zip 布局对齐真实 v2.1.2（根级 index.js 为运行入口；
@@ -364,7 +364,7 @@ def test_ensure_sources_native_rejects_bad_sha256(tmp_path):
     repo = tmp_path / "repo"
     (repo / "container" / "lxserver-artifact").mkdir(parents=True)
     shutil.copy(BASE / "ensure_sources_native.sh", repo / "ensure_sources_native.sh")
-    for req in ("musicdl-service", "musicbox-service", "qqmusic-service", "lxmusic-service", "webui-service"):
+    for req in ("musicbox-service", "qqmusic-service", "lxmusic-service", "webui-service"):
         (repo / req).mkdir()
         (repo / req / "requirements.txt").write_text("fastapi\n", encoding="utf-8")
     artifact = repo / "container" / "lxserver-artifact" / "lx-test-server.zip"
@@ -449,8 +449,8 @@ def test_native_render_special_paths_and_webui_command(tmp_path, monkeypatch, na
     assert result.returncode == 0, result.stderr
     conf = configparser.ConfigParser()
     conf.read(repo / "sources-native/supervisord.conf")
-    assert conf["program:musicdl"]["directory"] == str(repo / "musicdl-service")
-    assert shlex.split(conf["program:musicdl"]["command"])[0] == str(repo / ".venv-sources/bin/uvicorn")
+    assert conf["program:qqmusic"]["directory"] == str(repo / "qqmusic-service")
+    assert shlex.split(conf["program:qqmusic"]["command"])[0] == str(repo / ".venv-sources/bin/uvicorn")
     env = conf["program:webui"]["environment"]
     ctl = env.split('WEBUI_SUPERVISORCTL="', 1)[1].rsplit('"', 1)[0]
     bindir = tmp_path / "bin"
@@ -460,9 +460,9 @@ def test_native_render_special_paths_and_webui_command(tmp_path, monkeypatch, na
     stub.chmod(0o755)
     monkeypatch.setenv("PATH", f"{bindir}:{os.environ['PATH']}")
     monkeypatch.setitem(webui.CONF, "supervisorctl", ctl)
-    code, out = webui.supervisorctl("status", "musicdl")
+    code, out = webui.supervisorctl("status", "qqmusic")
     assert code == 0, out
-    assert json.loads(out) == ["-c", str(repo / "sources-native/supervisord.conf"), "status", "musicdl"]
+    assert json.loads(out) == ["-c", str(repo / "sources-native/supervisord.conf"), "status", "qqmusic"]
     result = run_bash(funcs + '\nrender_native_placeholders "$BASE_DIR/unit.in"',
                       env={"BASE_DIR": str(repo)})
     assert result.returncode == 0, result.stderr
@@ -526,7 +526,7 @@ def test_migrate_lx_lists_and_open_sources_between_modes(tmp_path, mode):
 def test_restore_adopt_parser_drives_foreign_native_cleanup(tmp_path, adopt):
     text = (BASE / "restore.sh").read_text()
     parser = text[text.index("FULL_RESTORE=0"):text.index("\nlog_info()")]
-    start = text.index("for unit in fnmusic-musicdl fnmusic-musicbox fnmusic-lxmusic fnmusic-sources; do")
+    start = text.index("for unit in fnmusic-musicbox fnmusic-lxmusic fnmusic-sources; do")
     cleanup = text[start:text.index("\ndone", start) + len("\ndone")]
     mocks = '''
 remove_owned_container() { printf 'remove %s\\n' "$*"; }

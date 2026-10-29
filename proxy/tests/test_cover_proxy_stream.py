@@ -23,15 +23,15 @@ def cover_env(tmp_path, monkeypatch):
     monkeypatch.setattr(proxy_app, "_cover_disk_last_clean", 0.0)
 
 
-def _wire_clients(monkeypatch, musicdl_handler, upstream_status=404):
+def _wire_clients(monkeypatch, qqmusic_handler, upstream_status=404):
     def upstream_handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(upstream_status, text="no upstream")
 
     app.state.upstream_client = httpx.AsyncClient(
         transport=httpx.MockTransport(upstream_handler), base_url="http://unix"
     )
-    app.state.musicdl_client = httpx.AsyncClient(
-        transport=httpx.MockTransport(musicdl_handler), base_url="http://127.0.0.1:8768"
+    app.state.qqmusic_client = httpx.AsyncClient(
+        transport=httpx.MockTransport(qqmusic_handler), base_url="http://127.0.0.1:8775"
     )
     app.state.musicbox_client = httpx.AsyncClient(
         transport=httpx.MockTransport(lambda r: httpx.Response(404)), base_url="http://127.0.0.1:8770"
@@ -41,17 +41,17 @@ def _wire_clients(monkeypatch, musicdl_handler, upstream_status=404):
     )
 
 
-def _migu_info_handler(cover_url: str, calls: dict | None = None):
+def _qqmusic_info_handler(cover_url: str, calls: dict | None = None):
     def handler(request: httpx.Request) -> httpx.Response:
         if calls is not None:
             calls["n"] += 1
-        assert request.url.path == "/info"
-        return httpx.Response(200, json={"ok": True, "id": "migu:9", "source": "migu",
-                                          "title": "歌", "artist": "手", "cover_url": cover_url})
+        assert request.url.path == "/api/v1/song/9/info"
+        return httpx.Response(200, json={"ok": True, "data": {
+            "song_name": "歌", "artist": "手", "album_pic_url": cover_url, "duration": 200}})
     return handler
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_playlist_cover_candidates_bounded_and_placeholder(monkeypatch):
     from starlette.requests import Request
 
@@ -84,9 +84,9 @@ async def test_playlist_cover_candidates_bounded_and_placeholder(monkeypatch):
 
 def test_cover_proxied_bytes_and_disk_cache(tmp_path, monkeypatch):
     """在线封面 200 直出字节；第二次请求命中磁盘缓存，不再打 info/CDN。"""
-    monkeypatch.setitem(CONF, "musicdl_enabled", True)
+    monkeypatch.setitem(CONF, "qqmusic_enabled", True)
     info_calls = {"n": 0}
-    _wire_clients(monkeypatch, _migu_info_handler("http://img.test/migu9.jpg", info_calls))
+    _wire_clients(monkeypatch, _qqmusic_info_handler("http://img.test/migu9.jpg", info_calls))
     img_calls = {"n": 0}
 
     def img_handler(request: httpx.Request) -> httpx.Response:
@@ -96,8 +96,8 @@ def test_cover_proxied_bytes_and_disk_cache(tmp_path, monkeypatch):
 
     monkeypatch.setattr(proxy_app, "_COVER_FETCH_ASYNC_TRANSPORT", httpx.MockTransport(img_handler))
     with TestClient(app) as client:
-        r1 = client.get("/music/api/v1/static/cover?coverId=online:migu:9", follow_redirects=False)
-        r2 = client.get("/music/api/v1/static/cover?coverId=online:migu:9", follow_redirects=False)
+        r1 = client.get("/music/api/v1/static/cover?coverId=online:qqmusic:9", follow_redirects=False)
+        r2 = client.get("/music/api/v1/static/cover?coverId=online:qqmusic:9", follow_redirects=False)
     assert r1.status_code == 200
     assert r1.headers["content-type"].startswith("image/jpeg")
     assert r1.content == IMG_BYTES
@@ -124,7 +124,7 @@ def test_legacy_track_snapshot_cover_without_info(monkeypatch):
     monkeypatch.setattr(proxy_app, "_COVER_FETCH_ASYNC_TRANSPORT", httpx.MockTransport(
         lambda request: httpx.Response(200, content=IMG_BYTES)))
     with TestClient(app) as client:
-        cover_id = "track_" + proxy_app.fake_official_guid("online:migu:snapshot")
+        cover_id = "track_" + proxy_app.fake_official_guid("online:qqmusic:snapshot")
         response = client.get("/music/api/v1/static/cover/" + cover_id + "_w120.jpg")
         assert response.status_code == 200 and response.content == IMG_BYTES
         response = client.head("/music/api/v1/static/cover", params={"coverId": cover_id + ".jpg"})
@@ -132,23 +132,23 @@ def test_legacy_track_snapshot_cover_without_info(monkeypatch):
 
 
 def test_cover_proxied_head(tmp_path, monkeypatch):
-    monkeypatch.setitem(CONF, "musicdl_enabled", True)
-    _wire_clients(monkeypatch, _migu_info_handler("http://img.test/migu9.jpg"))
+    monkeypatch.setitem(CONF, "qqmusic_enabled", True)
+    _wire_clients(monkeypatch, _qqmusic_info_handler("http://img.test/migu9.jpg"))
     monkeypatch.setattr(proxy_app, "_COVER_FETCH_ASYNC_TRANSPORT", httpx.MockTransport(
         lambda r: httpx.Response(200, content=IMG_BYTES, headers={"content-type": "image/jpeg"})))
     with TestClient(app) as client:
-        resp = client.head("/music/api/v1/static/cover?coverId=online:migu:9")
+        resp = client.head("/music/api/v1/static/cover?coverId=online:qqmusic:9")
     assert resp.status_code == 200
 
 
 def test_cover_fetch_failure_falls_to_placeholder(tmp_path, monkeypatch):
     """封面拉取失败（CDN 5xx）：回退链走完落占位图，且占位图 no-store 不被客户端粘住。"""
-    monkeypatch.setitem(CONF, "musicdl_enabled", True)
-    _wire_clients(monkeypatch, _migu_info_handler("http://img.test/dead.jpg"))
+    monkeypatch.setitem(CONF, "qqmusic_enabled", True)
+    _wire_clients(monkeypatch, _qqmusic_info_handler("http://img.test/dead.jpg"))
     monkeypatch.setattr(proxy_app, "_COVER_FETCH_ASYNC_TRANSPORT", httpx.MockTransport(
         lambda r: httpx.Response(500, text="cdn down")))
     with TestClient(app) as client:
-        resp = client.get("/music/api/v1/static/cover?coverId=online:migu:9", follow_redirects=False)
+        resp = client.get("/music/api/v1/static/cover?coverId=online:qqmusic:9", follow_redirects=False)
     assert resp.status_code == 200
     assert resp.headers["content-type"].startswith("image/png")
     assert resp.headers["cache-control"] == "no-store"
@@ -156,11 +156,11 @@ def test_cover_fetch_failure_falls_to_placeholder(tmp_path, monkeypatch):
 
 def test_cover_subpath_suffix_stripped(tmp_path, monkeypatch):
     """客户端按文件形态请求封面（<fake>.jpg / <fake>_w120.jpg）仍能反解直出。"""
-    monkeypatch.setitem(CONF, "musicdl_enabled", True)
-    _wire_clients(monkeypatch, _migu_info_handler("http://img.test/migu9.jpg"))
+    monkeypatch.setitem(CONF, "qqmusic_enabled", True)
+    _wire_clients(monkeypatch, _qqmusic_info_handler("http://img.test/migu9.jpg"))
     monkeypatch.setattr(proxy_app, "_COVER_FETCH_ASYNC_TRANSPORT", httpx.MockTransport(
         lambda r: httpx.Response(200, content=IMG_BYTES, headers={"content-type": "image/jpeg"})))
-    fake = fake_official_guid("online:migu:9")
+    fake = fake_official_guid("online:qqmusic:9")
     with TestClient(app) as client:
         r1 = client.get(f"/music/api/v1/static/cover/track_{fake}.jpg", follow_redirects=False)
         r2 = client.get(f"/music/api/v1/static/cover/track_{fake}_w120.jpg", follow_redirects=False)
@@ -183,11 +183,11 @@ def test_cover_id_unresolved_diag_logged_once(tmp_path, monkeypatch, caplog):
 
 def test_cover_mode_redirect_keeps_302(tmp_path, monkeypatch):
     """FNMUSIC_COVER_MODE=redirect 逃生：保留旧 302 外链行为。"""
-    monkeypatch.setitem(CONF, "musicdl_enabled", True)
+    monkeypatch.setitem(CONF, "qqmusic_enabled", True)
     monkeypatch.setitem(CONF, "cover_mode", "redirect")
-    _wire_clients(monkeypatch, _migu_info_handler("http://img.test/migu9.jpg"))
+    _wire_clients(monkeypatch, _qqmusic_info_handler("http://img.test/migu9.jpg"))
     with TestClient(app) as client:
-        resp = client.get("/music/api/v1/static/cover?coverId=online:migu:9", follow_redirects=False)
+        resp = client.get("/music/api/v1/static/cover?coverId=online:qqmusic:9", follow_redirects=False)
     assert resp.status_code == 302
     assert resp.headers["location"] == "http://img.test/migu9.jpg"
 

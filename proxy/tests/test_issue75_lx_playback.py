@@ -52,7 +52,7 @@ def _clean_lx_state(tmp_path, monkeypatch):
         path.mkdir()
         monkeypatch.setitem(CONF, key, str(path))
     monkeypatch.setattr(appmod, "_HOME", str(tmp_path))
-    for attr in ("upstream_client", "musicdl_client", "musicbox_client", "lx_client"):
+    for attr in ("upstream_client", "qqmusic_client", "musicbox_client", "lx_client"):
         monkeypatch.setattr(app.state, attr, None, raising=False)
     yield
     _LX_URL_PIN.clear()

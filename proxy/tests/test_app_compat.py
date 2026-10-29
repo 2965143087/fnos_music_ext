@@ -10,6 +10,9 @@ from fastapi.testclient import TestClient
 
 from proxy import recommend as dailyrec
 from proxy.app import app, CONF, _SEARCH_CACHE, fake_official_guid
+
+pytest.importorskip("fcntl", reason="proxy.takeover 依赖 POSIX fcntl，Windows 上跳过")
+
 from proxy.takeover import safe_child_log
 
 
@@ -24,7 +27,7 @@ def setup_compat_env(tmp_path, monkeypatch):
     monkeypatch.setitem(CONF, "fav_dir", fav_dir)
     monkeypatch.setitem(CONF, "cache_dir", str(tmp_path / "cache"))
     monkeypatch.setitem(CONF, "library_dir", str(tmp_path / "library"))
-    monkeypatch.setitem(CONF, "musicdl_enabled", True)
+    monkeypatch.setitem(CONF, "qqmusic_enabled", True)
     monkeypatch.setitem(CONF, "netease_enabled", True)
     monkeypatch.setitem(CONF, "lx_enabled", False)
     monkeypatch.setitem(CONF, "merge_suggest", False)
@@ -67,13 +70,13 @@ def test_favorite_list_probe_rejected_degrades_to_official():
     app.state.upstream_client = httpx.AsyncClient(
         transport=httpx.MockTransport(upstream_handler), base_url="http://unix"
     )
-    app.state.musicdl_client = httpx.AsyncClient(
-        transport=httpx.MockTransport(lambda r: httpx.Response(500)), base_url="http://127.0.0.1:8768"
+    app.state.qqmusic_client = httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda r: httpx.Response(500)), base_url="http://127.0.0.1:8775"
     )
     _write_fav_file("user-a", [{
-        "guid": "online:migu:600908",
+        "guid": "online:qqmusic:600908",
         "createdAt": 1700000000,
-        "track": {"guid": "online:migu:600908", "title": "稻香", "artists": [{"name": "周杰伦"}], "album": {"name": "魔杰座"}, "duration": 223000},
+        "track": {"guid": "online:qqmusic:600908", "title": "稻香", "artists": [{"name": "周杰伦"}], "album": {"name": "魔杰座"}, "duration": 223000},
     }])
 
     with TestClient(app) as client:
@@ -100,10 +103,10 @@ def test_play_history_list_probe_rejected_degrades_to_official():
     app.state.upstream_client = httpx.AsyncClient(
         transport=httpx.MockTransport(upstream_handler), base_url="http://unix"
     )
-    app.state.musicdl_client = httpx.AsyncClient(
-        transport=httpx.MockTransport(lambda r: httpx.Response(500)), base_url="http://127.0.0.1:8768"
+    app.state.qqmusic_client = httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda r: httpx.Response(500)), base_url="http://127.0.0.1:8775"
     )
-    dailyrec.record_online_play("user-a", "online:migu:600908", {"title": "稻香", "artist": "周杰伦"})
+    dailyrec.record_online_play("user-a", "online:qqmusic:600908", {"title": "稻香", "artist": "周杰伦"})
 
     with TestClient(app) as client:
         resp = client.get("/music/api/v1/play-history/list")
@@ -131,14 +134,14 @@ def test_favorite_list_online_entry_matches_official_shape():
     app.state.upstream_client = httpx.AsyncClient(
         transport=httpx.MockTransport(upstream_handler), base_url="http://unix"
     )
-    app.state.musicdl_client = httpx.AsyncClient(
-        transport=httpx.MockTransport(lambda r: httpx.Response(500)), base_url="http://127.0.0.1:8768"
+    app.state.qqmusic_client = httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda r: httpx.Response(500)), base_url="http://127.0.0.1:8775"
     )
     # 存量快照缺 artist/album/时长来源，验证兜底与字段还原
     _write_fav_file("user-a", [{
-        "guid": "online:migu:600908",
+        "guid": "online:qqmusic:600908",
         "createdAt": 1700000000,
-        "track": {"guid": "online:migu:600908", "title": "稻香", "duration": 223000},
+        "track": {"guid": "online:qqmusic:600908", "title": "稻香", "duration": 223000},
     }])
 
     with TestClient(app) as client:
@@ -147,7 +150,7 @@ def test_favorite_list_online_entry_matches_official_shape():
         rj = resp.json()
         assert rj["data"]["total"] == 2
         online_item = rj["data"]["list"][1]
-        assert online_item["guid"] == fake_official_guid("online:migu:600908")
+        assert online_item["guid"] == fake_official_guid("online:qqmusic:600908")
         assert online_item["title"] == "稻香"
         assert online_item["duration"] == 223000
         assert online_item["artists"][0]["name"] == "未知艺术家"
@@ -157,7 +160,7 @@ def test_favorite_list_online_entry_matches_official_shape():
         assert online_item["codec"] == "alac"
 
 
-def test_stream_head_and_path_form_guid():
+def test_stream_head_and_path_form_guid(monkeypatch):
     """stream 支持 HEAD 探测与路径形式 guid：命中缓存时不再透传上游。"""
     audio = b"FAKE_AUDIO_" * 100
     upstream_calls: list[str] = []
@@ -166,39 +169,47 @@ def test_stream_head_and_path_form_guid():
         upstream_calls.append(f"{request.method} {request.url.path}")
         return httpx.Response(500)
 
-    def musicdl_handler(request: httpx.Request) -> httpx.Response:
-        if request.url.path == "/info":
-            return httpx.Response(
-                200,
-                json={"ok": True, "id": "kuwo:228908", "title": "晴天", "artist": "周杰伦", "lyric": ""},
-            )
-        return httpx.Response(
-            200,
-            content=audio,
-            headers={"Content-Type": "audio/mpeg", "Content-Length": str(len(audio)), "Accept-Ranges": "bytes"},
-        )
+    def qqmusic_handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/url"):
+            return httpx.Response(200, json={"ok": True, "data": {
+                "code": 200, "url": "http://cdn.test/stream", "quality": "standard"}})
+        if request.url.path.endswith("/info"):
+            return httpx.Response(200, json={"ok": True, "data": {
+                "song_name": "晴天", "artist": "周杰伦", "duration": 269, "album_pic_url": ""}})
+        return httpx.Response(404)
+
+    # 媒体字节由自建客户端拉取：注入 MockTransport
+    media_transport = httpx.MockTransport(lambda r: httpx.Response(
+        200, content=audio,
+        headers={"Content-Type": "audio/mpeg", "Content-Length": str(len(audio)), "Accept-Ranges": "bytes"}))
+    real_async_client = httpx.AsyncClient
+
+    def patched_async_client(*args, **kwargs):
+        kwargs.setdefault("transport", media_transport)
+        return real_async_client(*args, **kwargs)
 
     app.state.upstream_client = httpx.AsyncClient(
         transport=httpx.MockTransport(upstream_handler), base_url="http://unix"
     )
-    app.state.musicdl_client = httpx.AsyncClient(
-        transport=httpx.MockTransport(musicdl_handler), base_url="http://127.0.0.1:8768"
+    app.state.qqmusic_client = httpx.AsyncClient(
+        transport=httpx.MockTransport(qqmusic_handler), base_url="http://127.0.0.1:8775"
     )
+    monkeypatch.setattr(httpx, "AsyncClient", patched_async_client)
 
     with TestClient(app) as client:
         # 先 GET 一次使 tee 缓存落盘
-        first = client.get("/music/api/v1/track/stream?guid=online:kuwo:228908")
+        first = client.get("/music/api/v1/track/stream?guid=online:qqmusic:228908")
         assert first.status_code == 200
         assert first.content == audio
         calls_before = len(upstream_calls)
 
-        head = client.head("/music/api/v1/track/stream/online:kuwo:228908")
+        head = client.head("/music/api/v1/track/stream/online:qqmusic:228908")
         assert head.status_code == 200
         assert head.headers.get("content-length") == str(len(audio))
         assert head.headers.get("x-accel-buffering") == "no"
         assert head.content == b""
 
-        got = client.get("/music/api/v1/track/stream/online:kuwo:228908")
+        got = client.get("/music/api/v1/track/stream/online:qqmusic:228908")
         assert got.status_code == 200
         assert got.content == audio
         assert len(upstream_calls) == calls_before
@@ -216,8 +227,8 @@ def test_event_report_captures_payload_metadata():
     app.state.upstream_client = httpx.AsyncClient(
         transport=httpx.MockTransport(upstream_handler), base_url="http://unix"
     )
-    app.state.musicdl_client = httpx.AsyncClient(
-        transport=httpx.MockTransport(lambda r: httpx.Response(500)), base_url="http://127.0.0.1:8768"
+    app.state.qqmusic_client = httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda r: httpx.Response(500)), base_url="http://127.0.0.1:8775"
     )
 
     with TestClient(app) as client:
@@ -226,7 +237,7 @@ def test_event_report_captures_payload_metadata():
             json={"events": [{
                 "eventType": "track_play",
                 "payload": {
-                    "trackGUID": "online:kuwo:228908",
+                    "trackGUID": "online:qqmusic:228908",
                     "title": "晴天",
                     "artist": "周杰伦",
                     "album": "叶惠美",
@@ -238,7 +249,7 @@ def test_event_report_captures_payload_metadata():
         assert resp.json()["code"] == 0
 
         items = dailyrec.load_online_play_history("user-a")
-        assert items and items[-1]["guid"] == "online:kuwo:228908"
+        assert items and items[-1]["guid"] == "online:qqmusic:228908"
         snap = items[-1]["track"]
         assert snap["title"] == "晴天"
         assert snap["artist"] == "周杰伦"
@@ -248,7 +259,7 @@ def test_event_report_captures_payload_metadata():
         listed = client.get("/music/api/v1/play-history/list")
         assert listed.status_code == 200
         rj = listed.json()
-        entry = next(it for it in rj["data"]["list"] if it.get("guid") == fake_official_guid("online:kuwo:228908"))
+        entry = next(it for it in rj["data"]["list"] if it.get("guid") == fake_official_guid("online:qqmusic:228908"))
         assert entry["title"] == "晴天"
         assert entry["artists"][0]["name"] == "周杰伦"
         assert entry["duration"] == 269000
@@ -267,8 +278,8 @@ def test_request_log_line(caplog):
     app.state.upstream_client = httpx.AsyncClient(
         transport=httpx.MockTransport(upstream_handler), base_url="http://unix"
     )
-    app.state.musicdl_client = httpx.AsyncClient(
-        transport=httpx.MockTransport(lambda r: httpx.Response(500)), base_url="http://127.0.0.1:8768"
+    app.state.qqmusic_client = httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda r: httpx.Response(500)), base_url="http://127.0.0.1:8775"
     )
 
     with caplog.at_level(logging.INFO, logger="fnmusic_proxy"):
@@ -378,18 +389,19 @@ def test_search_response_disguised_no_online_prefix():
             return httpx.Response(200, json={"code": 0, "data": {"guid": "user-a"}})
         return httpx.Response(500)
 
-    def musicdl_handler(request: httpx.Request) -> httpx.Response:
-        if request.url.path == "/search":
-            return httpx.Response(200, json={"ok": True, "items": [
-                {"id": "migu:600908", "title": "稻香", "artist": "周杰伦", "duration_s": 223, "download_url": "http://cdn/1.mp3"},
+    def qqmusic_handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/v1/search":
+            return httpx.Response(200, json={"ok": True, "data": [
+                {"song_id": "600908", "song_name": "稻香", "artist": "周杰伦",
+                 "duration": 223, "quality": "HQ", "album_pic_url": ""},
             ]})
         return httpx.Response(404)
 
     app.state.upstream_client = httpx.AsyncClient(
         transport=httpx.MockTransport(upstream_handler), base_url="http://unix"
     )
-    app.state.musicdl_client = httpx.AsyncClient(
-        transport=httpx.MockTransport(musicdl_handler), base_url="http://127.0.0.1:8768"
+    app.state.qqmusic_client = httpx.AsyncClient(
+        transport=httpx.MockTransport(qqmusic_handler), base_url="http://127.0.0.1:8775"
     )
 
     with TestClient(app) as client:
@@ -404,7 +416,7 @@ def test_search_response_disguised_no_online_prefix():
         it = online_items[0]
         assert it["coverId"].startswith("track_")
         assert resolve_real_guid(it["coverId"]).startswith("online:")
-        assert resolve_real_guid(str(it["guid"])) == "online:migu:600908"
+        assert resolve_real_guid(str(it["guid"])) == "online:qqmusic:600908"
 
 
 def test_registry_warm_rebuilds_after_restart(monkeypatch):
@@ -436,31 +448,32 @@ def test_metadata_reflects_favorite_state():
             return httpx.Response(200, json={"code": 0, "data": {"guid": "user-a"}})
         return httpx.Response(500)
 
-    def musicdl_handler(request: httpx.Request) -> httpx.Response:
-        if request.url.path == "/info":
-            return httpx.Response(200, json={"ok": True, "title": "稻香", "artist": "周杰伦"})
+    def qqmusic_handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/info"):
+            return httpx.Response(200, json={"ok": True, "data": {
+                "song_name": "稻香", "artist": "周杰伦", "duration": 223, "album_pic_url": ""}})
         return httpx.Response(404)
 
     app.state.upstream_client = httpx.AsyncClient(
         transport=httpx.MockTransport(upstream_handler), base_url="http://unix"
     )
-    app.state.musicdl_client = httpx.AsyncClient(
-        transport=httpx.MockTransport(musicdl_handler), base_url="http://127.0.0.1:8768"
+    app.state.qqmusic_client = httpx.AsyncClient(
+        transport=httpx.MockTransport(qqmusic_handler), base_url="http://127.0.0.1:8775"
     )
     _write_fav_file("user-a", [{
-        "guid": "online:migu:600908",
+        "guid": "online:qqmusic:600908",
         "createdAt": 1700000000,
-        "track": {"guid": "online:migu:600908", "title": "稻香", "duration": 223000},
+        "track": {"guid": "online:qqmusic:600908", "title": "稻香", "duration": 223000},
     }])
 
     with TestClient(app) as client:
-        resp = client.get("/music/api/v1/track/metadata", params={"guid": "online:migu:600908"})
+        resp = client.get("/music/api/v1/track/metadata", params={"guid": "online:qqmusic:600908"})
         assert resp.status_code == 200
         assert resp.json()["data"]["isFavorite"] is True
         assert resp.json()["data"]["track"]["isFavorite"] is True
         assert "online:" not in resp.text
 
-        resp2 = client.get("/music/api/v1/track/metadata", params={"guid": "online:migu:777"})
+        resp2 = client.get("/music/api/v1/track/metadata", params={"guid": "online:qqmusic:777"})
         assert resp2.status_code == 200
         assert resp2.json()["data"]["isFavorite"] is False
 
@@ -477,15 +490,15 @@ def test_history_entry_carries_favorite_state():
     app.state.upstream_client = httpx.AsyncClient(
         transport=httpx.MockTransport(upstream_handler), base_url="http://unix"
     )
-    app.state.musicdl_client = httpx.AsyncClient(
-        transport=httpx.MockTransport(lambda r: httpx.Response(500)), base_url="http://127.0.0.1:8768"
+    app.state.qqmusic_client = httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda r: httpx.Response(500)), base_url="http://127.0.0.1:8775"
     )
-    dailyrec.record_online_play("user-a", "online:migu:600908", {"title": "稻香", "artist": "周杰伦"})
-    dailyrec.record_online_play("user-a", "online:migu:777", {"title": "晴天"})
+    dailyrec.record_online_play("user-a", "online:qqmusic:600908", {"title": "稻香", "artist": "周杰伦"})
+    dailyrec.record_online_play("user-a", "online:qqmusic:777", {"title": "晴天"})
     _write_fav_file("user-a", [{
-        "guid": "online:migu:600908",
+        "guid": "online:qqmusic:600908",
         "createdAt": 1700000000,
-        "track": {"guid": "online:migu:600908", "title": "稻香", "duration": 223000},
+        "track": {"guid": "online:qqmusic:600908", "title": "稻香", "duration": 223000},
     }])
 
     with TestClient(app) as client:

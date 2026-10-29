@@ -47,11 +47,11 @@ GET /music/api/v1/search/track?q=<关键词>&page=<页号>&size=<页大小>
 - 在线池（`entry["items"]`）只追加不重排：同一 `(page, size, local_total)` 的
   切片稳定，已返回页的前缀永不移动（跨页零重复的根基）。
 - `data.total = 官方 total + 在线去重条数`，客户端据此继续翻页或停页。
-- 在线段内部顺序固定为：网易 > musicdl > 洛雪（聚合序）。
+- 在线段内部顺序固定为：网易 > QQ 音乐 > 洛雪（聚合序）。
 
 ## 3. 在线深分页（v2.7.0）
 
-首屏聚合只向各音源取第一页（网易 50 / musicdl ≤30 / 洛雪 ≤20×平台数）。
+首屏聚合只向各音源取第一页（网易 50 / QQ 音乐 50 / 洛雪 ≤20×平台数）。
 翻页越过在线池时，**深分页**自动向未取尽的源增量取下一页把本页在线段填满：
 
 - 触发：本页在线段末尾 `page*size - local_total` 超过池长时，`_wait_deep_pages`
@@ -67,7 +67,7 @@ GET /music/api/v1/search/track?q=<关键词>&page=<页号>&size=<页大小>
 | --- | --- | --- |
 | 网易（musicbox） | ✅ | `/api/v1/search` 新增 `offset` 参数；CLI 无 offset，`offset>0` 直接走官方 web 搜索接口（`api/search/get/web`，原生 offset 分页） |
 | 洛雪（lxmusic） | ✅ | `/api/v1/search` 新增 `page` 参数，透传到五平台上游分页参数：kg `page`、wy `offset`、mg `pageNo`、tx `page_num`、kw `pn` |
-| musicdl | ❌ | musicdl 库 `search()` 无分页参数（`search_size_per_source` 为页大小且封顶 10 保延迟），只参与首屏聚合 |
+| QQ 音乐（qqmusic） | ✅ | `/api/v1/search` 支持 `offset` 参数，深分页按 `offset = 页号 × 页大小` 增量取页 |
 
 配置（均可热重载、管理页「搜索」页可改）：
 

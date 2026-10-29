@@ -151,7 +151,7 @@ sudo systemctl daemon-reload 2>/dev/null || true
 #    v1.x 部署形态：三音源容器 / 宿主机 unit；v2.0.0：单容器 fnmusic-sources。一并清理，
 #    保证本脚本能还原「旧版已安装的机器」（升级 git 到 v2 后直接执行本脚本）。
 log_info "停止并移除音源容器与宿主机 unit（v1.x 三容器与 v2 单容器）..."
-for unit in fnmusic-musicdl fnmusic-musicbox fnmusic-lxmusic fnmusic-sources; do
+for unit in fnmusic-musicbox fnmusic-lxmusic fnmusic-sources; do
     if [ "${ADOPT:-0}" -eq 1 ]; then
         remove_owned_container "${unit}" --adopt
         stop_owned_source_unit "${unit}" --adopt
@@ -166,7 +166,7 @@ for unit in fnmusic-musicdl fnmusic-musicbox fnmusic-lxmusic fnmusic-sources; do
 done
 # 如实校验清理结果：容器可能被其他副本/并发任务重建，绝不静默假成功
 leftover=""
-for unit in fnmusic-musicdl fnmusic-musicbox fnmusic-lxmusic fnmusic-sources; do
+for unit in fnmusic-musicbox fnmusic-lxmusic fnmusic-sources; do
     if run_docker ps -a --format '{{.Names}}' 2>/dev/null | grep -qx "${unit}"; then
         leftover="${leftover} ${unit}"
     fi

@@ -31,7 +31,7 @@ def test_all_pytest_roots_run_exactly_once():
     # Directories, not a file allowlist: new tests in any suite are not lost.
     assert all((ROOT / path).is_dir() for path in scheduled)
     assert runner.PHASES[0] == {"proxy": ("proxy/tests",)}
-    assert set(runner.PHASES[1]) == {"webui", "musicdl", "qqmusic", "lxmusic"}
+    assert set(runner.PHASES[1]) == {"webui", "qqmusic", "lxmusic"}
     assert set(runner.PHASES[2]) == {"infrastructure"}
 
 
@@ -65,7 +65,7 @@ def test_main_preserves_phase_barriers_and_deduplicates_selection(monkeypatch):
     # Failure must be reported but must not skip remaining suites/phases.
     assert runner.main(["--jobs", "1"]) == 1
     assert calls == [(["proxy"], 1, False),
-                     (["webui", "musicdl", "qqmusic", "lxmusic"], 1, False),
+                     (["webui", "qqmusic", "lxmusic"], 1, False),
                      (["infrastructure"], 1, False)]
     calls.clear()
     assert runner.main(["--suite", "lxmusic", "--suite", "lxmusic"]) == 0
@@ -289,6 +289,6 @@ def test_ci_uses_runner_and_retains_unique_image_checks():
         "linux/amd64", "linux/arm64",
     }
     steps = {step.get("name"): step for step in images["steps"]}
-    assert steps["Verify on-demand musicdl healthz"]["if"] == "matrix.arch == 'x64'"
+    assert steps["Verify WebUI startup and healthz"]["if"] == "matrix.arch == 'x64'"
     assert "--require-non-root" in steps["Verify non-root contract for each bundled service"]["run"]
     assert "sleep 120" in steps["Smoke lxmusic chain on ${{ matrix.platform }}"]["run"]

@@ -47,7 +47,6 @@ def setup_test_env(tmp_path, monkeypatch):
     monkeypatch.setitem(CONF, "netease_search_limit", 50)
     monkeypatch.setitem(CONF, "merge_suggest", False)
     monkeypatch.setitem(CONF, "lyric_field", "data.lyric")
-    monkeypatch.setitem(CONF, "musicdl_enabled", True)
     monkeypatch.setitem(CONF, "netease_enabled", True)
     monkeypatch.setitem(CONF, "lx_enabled", False)
     monkeypatch.setitem(CONF, "netease_wait_s", 3.0)
@@ -163,14 +162,8 @@ def test_search_track_merge_success():
         }
         return httpx.Response(200, json=data)
 
-    def musicdl_handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, json={"ok": True, "items": []})
-
     app.state.upstream_client = httpx.AsyncClient(
         transport=httpx.MockTransport(upstream_handler), base_url="http://unix"
-    )
-    app.state.musicdl_client = httpx.AsyncClient(
-        transport=httpx.MockTransport(musicdl_handler), base_url="http://127.0.0.1:8768"
     )
     app.state.musicbox_client = httpx.AsyncClient(
         transport=httpx.MockTransport(musicbox_handler), base_url="http://127.0.0.1:8770"
@@ -230,14 +223,8 @@ def test_search_track_merge_with_q_param():
             },
         )
 
-    def musicdl_handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, json={"ok": True, "items": []})
-
     app.state.upstream_client = httpx.AsyncClient(
         transport=httpx.MockTransport(upstream_handler), base_url="http://unix"
-    )
-    app.state.musicdl_client = httpx.AsyncClient(
-        transport=httpx.MockTransport(musicdl_handler), base_url="http://127.0.0.1:8768"
     )
     app.state.musicbox_client = httpx.AsyncClient(
         transport=httpx.MockTransport(musicbox_handler), base_url="http://127.0.0.1:8770"
@@ -251,8 +238,9 @@ def test_search_track_merge_with_q_param():
         assert items[0]["guid"] == fake_official_guid("online:netease:1")
 
 
-def test_search_track_preserves_lossless_and_common_formats():
+def test_search_track_preserves_lossless_and_common_formats(monkeypatch):
     """在线结果按源站真实格式声明 audioSpec（flac/wav/m4a），不再一律伪装 mp3。"""
+    monkeypatch.setitem(CONF, "lx_enabled", True)
 
     def upstream_handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(
@@ -278,25 +266,29 @@ def test_search_track_preserves_lossless_and_common_formats():
             },
         )
 
-    def musicdl_handler(request: httpx.Request) -> httpx.Response:
+    def lx_handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(
             200,
             json={
                 "ok": True,
                 "items": [
                     {
-                        "id": "migu:m4a1",
-                        "source": "migu",
+                        "id": "lx:mg:m4a1",
+                        "source": "lx",
+                        "lx_source": "mg",
                         "title": "海阔天空",
                         "artist": "Beyond",
+                        "album": "犹豫",
                         "duration_s": 326,
                         "ext": "aac",
                     },
                     {
-                        "id": "kuwo:wav1",
-                        "source": "kuwo",
+                        "id": "lx:kw:wav1",
+                        "source": "lx",
+                        "lx_source": "kw",
                         "title": "光辉岁月",
                         "artist": "Beyond",
+                        "album": "犹豫",
                         "duration_s": 300,
                         "ext": "wav",
                     },
@@ -307,11 +299,11 @@ def test_search_track_preserves_lossless_and_common_formats():
     app.state.upstream_client = httpx.AsyncClient(
         transport=httpx.MockTransport(upstream_handler), base_url="http://unix"
     )
-    app.state.musicdl_client = httpx.AsyncClient(
-        transport=httpx.MockTransport(musicdl_handler), base_url="http://127.0.0.1:8768"
-    )
     app.state.musicbox_client = httpx.AsyncClient(
         transport=httpx.MockTransport(musicbox_handler), base_url="http://127.0.0.1:8770"
+    )
+    app.state.lx_client = httpx.AsyncClient(
+        transport=httpx.MockTransport(lx_handler), base_url="http://127.0.0.1:8772"
     )
 
     with TestClient(app) as client:
@@ -325,9 +317,9 @@ def test_search_track_preserves_lossless_and_common_formats():
         assert flac["audioSpec"]["format"] == "flac"
         assert flac["audioSpec"]["path"].endswith(".flac")
         assert flac["coverId"] == "track_" + fake_official_guid("online:netease:flac1")
-        assert by_guid[fake_official_guid("online:migu:m4a1")]["format"] == "m4a"
-        assert by_guid[fake_official_guid("online:kuwo:wav1")]["format"] == "wav"
-        assert by_guid[fake_official_guid("online:kuwo:wav1")]["audioSpec"]["bitDepth"] == 16
+        assert by_guid[fake_official_guid("online:lx:mg:m4a1")]["format"] == "m4a"
+        assert by_guid[fake_official_guid("online:lx:kw:wav1")]["format"] == "wav"
+        assert by_guid[fake_official_guid("online:lx:kw:wav1")]["audioSpec"]["bitDepth"] == 16
 
 
 def test_search_track_merges_when_upstream_data_null_list_missing():
@@ -353,14 +345,8 @@ def test_search_track_merges_when_upstream_data_null_list_missing():
             },
         )
 
-    def musicdl_handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, json={"ok": True, "items": []})
-
     app.state.upstream_client = httpx.AsyncClient(
         transport=httpx.MockTransport(upstream_handler), base_url="http://unix"
-    )
-    app.state.musicdl_client = httpx.AsyncClient(
-        transport=httpx.MockTransport(musicdl_handler), base_url="http://127.0.0.1:8768"
     )
     app.state.musicbox_client = httpx.AsyncClient(
         transport=httpx.MockTransport(musicbox_handler), base_url="http://127.0.0.1:8770"
@@ -374,57 +360,44 @@ def test_search_track_merges_when_upstream_data_null_list_missing():
         assert items[0]["format"] == "flac"
 
 
-def test_metadata_uses_source_ext_not_forced_mp3():
+def test_metadata_uses_source_ext_not_forced_mp3(monkeypatch):
+    monkeypatch.setitem(CONF, "lx_enabled", True)
+
     def upstream_handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(500)
 
-    def musicdl_handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(
-            200,
-            json={
-                "ok": True,
-                "id": "kuwo:flac1",
-                "title": "不再犹豫",
-                "artist": "Beyond",
-                "duration_s": 240,
-                "ext": "flac",
-                "file_size": 28000000,
-                "cover_url": "http://img.test/c.jpg",
-                "source": "kuwo",
-            },
-        )
+    def lx_handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/v1/track/info":
+            return httpx.Response(200, json={"ok": True, "data": {
+                "id": "lx:kg:flac1", "lx_source": "kg", "title": "不再犹豫", "artist": "Beyond",
+                "album": "犹豫", "duration_s": 240, "ext": "flac", "file_size": 28000000,
+                "cover_url": "http://img.test/c.jpg"}})
+        return httpx.Response(404)
 
     app.state.upstream_client = httpx.AsyncClient(
         transport=httpx.MockTransport(upstream_handler), base_url="http://unix"
     )
-    app.state.musicdl_client = httpx.AsyncClient(
-        transport=httpx.MockTransport(musicdl_handler), base_url="http://127.0.0.1:8768"
+    app.state.lx_client = httpx.AsyncClient(
+        transport=httpx.MockTransport(lx_handler), base_url="http://127.0.0.1:8772"
     )
 
     with TestClient(app) as client:
-        resp = client.get("/music/api/v1/track/metadata?guid=online:kuwo:flac1")
+        resp = client.get("/music/api/v1/track/metadata?guid=online:lx:kg:flac1")
         spec = resp.json()["data"]["audioSpec"]
         assert spec["format"] == "flac"
         assert spec["codec"] == "flac"
         assert spec["path"].endswith(".flac")
-        _assert_playback_metadata_shape(resp.json()["data"], guid="online:kuwo:flac1")
+        _assert_playback_metadata_shape(resp.json()["data"], guid="online:lx:kg:flac1")
 
 
 def test_search_track_upstream_unauthorized():
-    """用例 b: 上游 99999 (未登录/INVALID TOKEN) → 原样透传不合并，且快速路径绝不调用 musicdl。"""
+    """用例 b: 上游 99999 (未登录/INVALID TOKEN) → 原样透传不合并，且快速路径绝不回源。"""
     def upstream_handler(request: httpx.Request) -> httpx.Response:
         data = {"code": 99999, "msg": "INVALID TOKEN", "data": None}
         return httpx.Response(200, json=data)
 
-    def musicdl_handler(request: httpx.Request) -> httpx.Response:
-        # 并行预取可能被触发，但 401 路径必须立刻返回、不依赖该响应
-        return httpx.Response(200, json={"ok": True, "items": [{"id": "should-not-merge"}]})
-
     app.state.upstream_client = httpx.AsyncClient(
         transport=httpx.MockTransport(upstream_handler), base_url="http://unix"
-    )
-    app.state.musicdl_client = httpx.AsyncClient(
-        transport=httpx.MockTransport(musicdl_handler), base_url="http://127.0.0.1:8768"
     )
 
     with TestClient(app) as client:
@@ -437,18 +410,12 @@ def test_search_track_upstream_unauthorized():
 
 
 def test_search_track_upstream_http_401_fast_path():
-    """上游 HTTP 401 非 200 响应 → 快速路径原样透传，不调用 musicdl。"""
+    """上游 HTTP 401 非 200 响应 → 快速路径原样透传，不回源。"""
     def upstream_handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(401, json={"code": 99999, "msg": "UNAUTHORIZED"})
 
-    def musicdl_handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, json={"ok": True, "items": []})
-
     app.state.upstream_client = httpx.AsyncClient(
         transport=httpx.MockTransport(upstream_handler), base_url="http://unix"
-    )
-    app.state.musicdl_client = httpx.AsyncClient(
-        transport=httpx.MockTransport(musicdl_handler), base_url="http://127.0.0.1:8768"
     )
 
     with TestClient(app) as client:
@@ -458,20 +425,14 @@ def test_search_track_upstream_http_401_fast_path():
 
 
 def test_search_suggest_upstream_unauthorized_fast_path(monkeypatch):
-    """开启 suggest 合并时，若上游返回 99999，快速路径直接返回，不调用 musicdl。"""
+    """开启 suggest 合并时，若上游返回 99999，快速路径直接返回，不回源。"""
     monkeypatch.setitem(CONF, "merge_suggest", True)
 
     def upstream_handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json={"code": 99999, "msg": "INVALID TOKEN", "data": None})
 
-    def musicdl_handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, json={"ok": True, "items": [{"title": "should-not-merge"}]})
-
     app.state.upstream_client = httpx.AsyncClient(
         transport=httpx.MockTransport(upstream_handler), base_url="http://unix"
-    )
-    app.state.musicdl_client = httpx.AsyncClient(
-        transport=httpx.MockTransport(musicdl_handler), base_url="http://127.0.0.1:8768"
     )
 
     with TestClient(app) as client:
@@ -524,14 +485,8 @@ def test_search_track_deduplication():
         }
         return httpx.Response(200, json=data)
 
-    def musicdl_handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, json={"ok": True, "items": []})
-
     app.state.upstream_client = httpx.AsyncClient(
         transport=httpx.MockTransport(upstream_handler), base_url="http://unix"
-    )
-    app.state.musicdl_client = httpx.AsyncClient(
-        transport=httpx.MockTransport(musicdl_handler), base_url="http://127.0.0.1:8768"
     )
     app.state.musicbox_client = httpx.AsyncClient(
         transport=httpx.MockTransport(musicbox_handler), base_url="http://127.0.0.1:8770"
@@ -547,8 +502,20 @@ def test_search_track_deduplication():
         assert items[1]["title"] == "[music box] 晴天 (Live)"
 
 
+def _netease_stream_monkeypatch(monkeypatch, cdn_handler):
+    """测试注入：让代理为取流新建的 httpx 客户端走 CDN mock。"""
+    orig_async_client_init = httpx.AsyncClient.__init__
+
+    def mock_client_init(self, *args, **kwargs):
+        if "base_url" not in kwargs and not kwargs.get("transport"):
+            kwargs["transport"] = httpx.MockTransport(cdn_handler)
+        orig_async_client_init(self, *args, **kwargs)
+
+    monkeypatch.setattr(httpx.AsyncClient, "__init__", mock_client_init)
+
+
 def test_stream_online_guid_range_and_tee_cache(monkeypatch):
-    """用例 d: stream online guid Range 转发与落盘 (mock musicdl 返回带 Content-Length 的 200 流，断言 cache 文件生成且内容一致)。"""
+    """用例 d: stream online guid Range 转发与落盘 (mock 音源返回带 Content-Length 的 200 流，断言 cache 文件生成且内容一致)。"""
     # 自动下载歌词开启场景：落库后同名 .lrc 一并写入（默认关，见 test_tee_cache.py）
     monkeypatch.setitem(CONF, "lyric_auto_dl", True)
     audio_content = b"RIFF....WAVEfmt....FAKE_MP3_STREAM_CONTENT" * 50
@@ -557,22 +524,20 @@ def test_stream_online_guid_range_and_tee_cache(monkeypatch):
     def upstream_handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(500, text="Should not be called")
 
-    def musicdl_handler(request: httpx.Request) -> httpx.Response:
-        if request.url.path == "/info":
-            return httpx.Response(
-                200,
-                json={
-                    "ok": True,
-                    "id": "kuwo:228908",
-                    "lyric": "[00:00.00]晴天 - 周杰伦\n[00:10.00]故事的小黄花",
-                    "title": "晴天",
-                    "artist": "周杰伦",
-                    "album": "叶惠美",
-                },
-            )
-        assert request.url.path == "/stream"
-        assert request.url.params.get("id") == "kuwo:228908"
-        assert request.url.params.get("proxy") == "true"
+    def musicbox_handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/v1/song/186016/url":
+            return httpx.Response(200, json={"ok": True, "data": {
+                "code": 200, "id": "186016", "url": "http://audio.test/186016.mp3", "size": len(audio_content)}})
+        if request.url.path == "/api/v1/song/186016/info":
+            return httpx.Response(200, json={"ok": True, "data": {
+                "name": "晴天", "ar": [{"name": "周杰伦"}], "al": {"name": "叶惠美"}, "dt": 269000}})
+        if request.url.path == "/api/v1/song/186016/lyric":
+            return httpx.Response(200, json={"ok": True, "data": {
+                "lyric": "[00:00.00]晴天 - 周杰伦\n[00:10.00]故事的小黄花"}})
+        return httpx.Response(404)
+
+    def cdn_handler(request: httpx.Request) -> httpx.Response:
+        assert "audio.test" in str(request.url)
         return httpx.Response(
             200,
             content=audio_content,
@@ -586,12 +551,13 @@ def test_stream_online_guid_range_and_tee_cache(monkeypatch):
     app.state.upstream_client = httpx.AsyncClient(
         transport=httpx.MockTransport(upstream_handler), base_url="http://unix"
     )
-    app.state.musicdl_client = httpx.AsyncClient(
-        transport=httpx.MockTransport(musicdl_handler), base_url="http://127.0.0.1:8768"
+    app.state.musicbox_client = httpx.AsyncClient(
+        transport=httpx.MockTransport(musicbox_handler), base_url="http://127.0.0.1:8770"
     )
+    _netease_stream_monkeypatch(monkeypatch, cdn_handler)
 
     with TestClient(app) as client:
-        resp = client.get("/music/api/v1/track/stream?guid=online:kuwo:228908")
+        resp = client.get("/music/api/v1/track/stream?guid=online:netease:186016")
         assert resp.status_code == 200
         assert resp.content == audio_content
         assert resp.headers.get("content-length") == content_len
@@ -599,7 +565,7 @@ def test_stream_online_guid_range_and_tee_cache(monkeypatch):
         # 检查落盘到飞牛曲库目录：歌名 - id.ext + 同名 .lrc
         cache_file = os.path.join(CONF["library_dir"], "周杰伦 - 晴天.mp3")
         assert os.path.exists(cache_file)
-        assert "228908" not in os.path.basename(cache_file)
+        assert "186016" not in os.path.basename(cache_file)
         with open(cache_file, "rb") as f:
             saved = f.read()
         assert saved == audio_content
@@ -610,14 +576,24 @@ def test_stream_online_guid_range_and_tee_cache(monkeypatch):
             assert "晴天" in f.read()
 
 
-def test_stream_online_guid_range_0_1_safari_probe_no_cache():
+def test_stream_online_guid_range_0_1_safari_probe_no_cache(monkeypatch):
     """Safari Range bytes=0-1 探测不产生任何缓存文件（tmp cache dir 断言为空）。"""
     probe_content = b"\x00\x01"
 
     def upstream_handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(500)
 
-    def musicdl_handler(request: httpx.Request) -> httpx.Response:
+    def musicbox_handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/v1/song/186016/url":
+            return httpx.Response(200, json={"ok": True, "data": {
+                "code": 200, "id": "186016", "url": "http://audio.test/186016.mp3", "size": 5000}})
+        if request.url.path == "/api/v1/song/186016/info":
+            return httpx.Response(200, json={"ok": True, "data": {
+                "name": "晴天", "ar": [{"name": "周杰伦"}], "al": {"name": "叶惠美"}, "dt": 269000}})
+        return httpx.Response(404)
+
+    def cdn_handler(request: httpx.Request) -> httpx.Response:
+        assert "audio.test" in str(request.url)
         assert request.headers.get("range") == "bytes=0-1"
         return httpx.Response(
             206,
@@ -633,13 +609,14 @@ def test_stream_online_guid_range_0_1_safari_probe_no_cache():
     app.state.upstream_client = httpx.AsyncClient(
         transport=httpx.MockTransport(upstream_handler), base_url="http://unix"
     )
-    app.state.musicdl_client = httpx.AsyncClient(
-        transport=httpx.MockTransport(musicdl_handler), base_url="http://127.0.0.1:8768"
+    app.state.musicbox_client = httpx.AsyncClient(
+        transport=httpx.MockTransport(musicbox_handler), base_url="http://127.0.0.1:8770"
     )
+    _netease_stream_monkeypatch(monkeypatch, cdn_handler)
 
     with TestClient(app) as client:
         resp = client.get(
-            "/music/api/v1/track/stream?guid=online:kuwo:228908",
+            "/music/api/v1/track/stream?guid=online:netease:186016",
             headers={"Range": "bytes=0-1"},
         )
         assert resp.status_code == 206
@@ -664,14 +641,8 @@ def test_stream_online_guid_existing_cache_no_part():
     def upstream_handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(500)
 
-    def musicdl_handler(request: httpx.Request) -> httpx.Response:
-        pytest.fail("musicdl should not be called when local cache exists")
-
     app.state.upstream_client = httpx.AsyncClient(
         transport=httpx.MockTransport(upstream_handler), base_url="http://unix"
-    )
-    app.state.musicdl_client = httpx.AsyncClient(
-        transport=httpx.MockTransport(musicdl_handler), base_url="http://127.0.0.1:8768"
     )
 
     with TestClient(app) as client:
@@ -693,14 +664,24 @@ def test_stream_online_guid_existing_cache_no_part():
             assert f.read() == existing_content
 
 
-def test_stream_online_guid_nonzero_range_no_cache():
+def test_stream_online_guid_nonzero_range_no_cache(monkeypatch):
     """Range 从非 0 开始时不落盘，只转发。"""
     partial_content = b"PARTIAL_STREAM_DATA"
 
     def upstream_handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(500)
 
-    def musicdl_handler(request: httpx.Request) -> httpx.Response:
+    def musicbox_handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/v1/song/186016/url":
+            return httpx.Response(200, json={"ok": True, "data": {
+                "code": 200, "id": "186016", "url": "http://audio.test/186016.mp3", "size": 1000}})
+        if request.url.path == "/api/v1/song/186016/info":
+            return httpx.Response(200, json={"ok": True, "data": {
+                "name": "晴天", "ar": [{"name": "周杰伦"}], "al": {"name": "叶惠美"}, "dt": 269000}})
+        return httpx.Response(404)
+
+    def cdn_handler(request: httpx.Request) -> httpx.Response:
+        assert "audio.test" in str(request.url)
         assert request.headers.get("range") == "bytes=100-119"
         return httpx.Response(
             206,
@@ -716,13 +697,14 @@ def test_stream_online_guid_nonzero_range_no_cache():
     app.state.upstream_client = httpx.AsyncClient(
         transport=httpx.MockTransport(upstream_handler), base_url="http://unix"
     )
-    app.state.musicdl_client = httpx.AsyncClient(
-        transport=httpx.MockTransport(musicdl_handler), base_url="http://127.0.0.1:8768"
+    app.state.musicbox_client = httpx.AsyncClient(
+        transport=httpx.MockTransport(musicbox_handler), base_url="http://127.0.0.1:8770"
     )
+    _netease_stream_monkeypatch(monkeypatch, cdn_handler)
 
     with TestClient(app) as client:
         resp = client.get(
-            "/music/api/v1/track/stream?guid=online:kuwo:228908",
+            "/music/api/v1/track/stream?guid=online:netease:186016",
             headers={"Range": "bytes=100-119"},
         )
         assert resp.status_code == 206
@@ -730,25 +712,19 @@ def test_stream_online_guid_nonzero_range_no_cache():
         assert resp.headers.get("content-range") == "bytes 100-119/1000"
 
         # 断言没有落盘
-        cache_file = os.path.join(CONF["cache_dir"], "online_kuwo_228908.mp3")
+        cache_file = os.path.join(CONF["cache_dir"], "online_netease_186016.mp3")
         assert not os.path.exists(cache_file)
         assert not os.path.exists(os.path.join(CONF["library_dir"], "unknown.mp3"))
-        assert not os.path.exists(os.path.join(CONF["library_dir"], "unknown - 228908.mp3"))
+        assert not os.path.exists(os.path.join(CONF["library_dir"], "unknown - 186016.mp3"))
 
 
 def test_stream_online_guid_unavailable_404():
-    """musicdl 404/502 时返回飞牛格式 404 JSON。"""
+    """音源 404/502 时返回飞牛格式 404 JSON。"""
     def upstream_handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(500)
 
-    def musicdl_handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(502, json={"detail": "Source error"})
-
     app.state.upstream_client = httpx.AsyncClient(
         transport=httpx.MockTransport(upstream_handler), base_url="http://unix"
-    )
-    app.state.musicdl_client = httpx.AsyncClient(
-        transport=httpx.MockTransport(musicdl_handler), base_url="http://127.0.0.1:8768"
     )
 
     with TestClient(app) as client:
@@ -779,14 +755,8 @@ def test_stream_non_online_guid_passthrough():
             },
         )
 
-    def musicdl_handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(500)
-
     app.state.upstream_client = httpx.AsyncClient(
         transport=httpx.MockTransport(upstream_handler), base_url="http://unix"
-    )
-    app.state.musicdl_client = httpx.AsyncClient(
-        transport=httpx.MockTransport(musicdl_handler), base_url="http://127.0.0.1:8768"
     )
 
     with TestClient(app) as client:
@@ -799,61 +769,54 @@ def test_stream_non_online_guid_passthrough():
         assert resp.headers.get("content-range") == "bytes 0-100/5000"
 
 
-def test_online_lyrics_and_metadata():
-    """在线歌词与元数据合成。"""
+def test_online_lyrics_and_metadata(monkeypatch):
+    """在线歌词与元数据合成（洛雪音源）。"""
+    monkeypatch.setitem(CONF, "lx_enabled", True)
+
     def upstream_handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(500)
 
-    def musicdl_handler(request: httpx.Request) -> httpx.Response:
-        if request.url.path == "/info":
-            assert request.url.params.get("id") == "kuwo:228908"
+    def lx_handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/v1/track/info":
+            return httpx.Response(200, json={"ok": True, "data": {
+                "id": "lx:kw:228908", "lx_source": "kw", "title": "晴天", "artist": "周杰伦",
+                "album": "叶惠美", "duration_s": 269.0, "ext": "mp3", "cover_url": "", "lyric": ""}})
+        if request.url.path == "/api/v1/track/lyric":
             return httpx.Response(
-                200,
-                json={
-                    "ok": True,
-                    "id": "kuwo:228908",
-                    "source": "kuwo",
-                    "title": "晴天",
-                    "artist": "周杰伦",
-                    "album": "叶惠美",
-                    "duration_s": 269,
-                    "ext": "mp3",
-                    "lyric": "[00:00.00]晴天 - 周杰伦\n[00:10.00]故事的小黄花",
-                },
-            )
+                200, json={"ok": True, "data": {"id": "lx:kw:228908", "lyric": "[00:00.00]晴天 - 周杰伦\n"}})
         return httpx.Response(404)
 
     app.state.upstream_client = httpx.AsyncClient(
         transport=httpx.MockTransport(upstream_handler), base_url="http://unix"
     )
-    app.state.musicdl_client = httpx.AsyncClient(
-        transport=httpx.MockTransport(musicdl_handler), base_url="http://127.0.0.1:8768"
+    app.state.lx_client = httpx.AsyncClient(
+        transport=httpx.MockTransport(lx_handler), base_url="http://127.0.0.1:8772"
     )
 
     with TestClient(app) as client:
         # Lyrics (legacy path)
-        resp = client.get("/music/api/v1/track/lyrics?guid=online:kuwo:228908")
+        resp = client.get("/music/api/v1/track/lyrics?guid=online:lx:kw:228908")
         assert resp.status_code == 200
         rj = resp.json()
         assert rj["code"] == 0
-        assert rj["data"]["guid"] == fake_official_guid("online:kuwo:228908")
+        assert rj["data"]["guid"] == fake_official_guid("online:lx:kw:228908")
         assert "[00:00.00]晴天" in rj["data"]["lyric"]
 
         # 飞牛播放器实际走 GET /lyric/list?trackGUID=
-        resp_list = client.get("/music/api/v1/lyric/list?trackGUID=online:kuwo:228908")
+        resp_list = client.get("/music/api/v1/lyric/list?trackGUID=online:lx:kw:228908")
         assert resp_list.status_code == 200
         lj = resp_list.json()
         assert lj["code"] == 0
-        assert lj["data"]["preferred"] == fake_official_guid("online:kuwo:228908:lyric")
+        assert lj["data"]["preferred"] == fake_official_guid("online:lx:kw:228908:lyric")
         assert len(lj["data"]["list"]) == 1
         item = lj["data"]["list"][0]
-        assert item["guid"] == fake_official_guid("online:kuwo:228908:lyric")
+        assert item["guid"] == fake_official_guid("online:lx:kw:228908:lyric")
         assert item["source"] == 2
         assert item["isLRC"] is True
         assert "[00:00.00]晴天" in item["content"]
 
         # Metadata
-        resp2 = client.get("/music/api/v1/track/metadata?guid=online:kuwo:228908")
+        resp2 = client.get("/music/api/v1/track/metadata?guid=online:lx:kw:228908")
         assert resp2.status_code == 200
         rj2 = resp2.json()
         assert rj2["code"] == 0
@@ -863,132 +826,120 @@ def test_online_lyrics_and_metadata():
         assert rj2["data"]["audioSpec"]["format"] == "mp3"
         assert rj2["data"]["audioSpec"]["codec"] == "mp3"
         assert rj2["data"]["audioSpec"]["channel"] == 2
-        _assert_playback_metadata_shape(rj2["data"], guid="online:kuwo:228908")
+        _assert_playback_metadata_shape(rj2["data"], guid="online:lx:kw:228908")
         assert rj2["data"]["track"]["hasLyric"] is True
 
 
-def test_online_lyrics_and_metadata_musicdl_error():
+def test_online_lyrics_and_metadata_source_error(monkeypatch):
     """在线歌词/元数据获取失败时，安全返回 code 0 和空 data，绝不 500。"""
+    monkeypatch.setitem(CONF, "lx_enabled", True)
+
     def upstream_handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(500)
 
-    def musicdl_handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(500, json={"error": "failed"})
+    def lx_handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(500)
 
     app.state.upstream_client = httpx.AsyncClient(
         transport=httpx.MockTransport(upstream_handler), base_url="http://unix"
     )
-    app.state.musicdl_client = httpx.AsyncClient(
-        transport=httpx.MockTransport(musicdl_handler), base_url="http://127.0.0.1:8768"
+    app.state.lx_client = httpx.AsyncClient(
+        transport=httpx.MockTransport(lx_handler), base_url="http://127.0.0.1:8772"
     )
 
     with TestClient(app) as client:
-        resp = client.get("/music/api/v1/track/lyrics?guid=online:kuwo:err")
+        resp = client.get("/music/api/v1/track/lyrics?guid=online:lx:kw:err")
         assert resp.status_code == 200
         assert resp.json() == {"code": 0, "msg": "ok", "data": {}}
 
-        resp_list = client.get("/music/api/v1/lyric/list?trackGUID=online:kuwo:err")
+        resp_list = client.get("/music/api/v1/lyric/list?trackGUID=online:lx:kw:err")
         assert resp_list.status_code == 200
         assert resp_list.json()["code"] == 0
         assert resp_list.json()["data"]["list"] == []
         assert resp_list.json()["data"]["preferred"] == ""
 
-        resp2 = client.get("/music/api/v1/track/metadata?guid=online:kuwo:err")
+        resp2 = client.get("/music/api/v1/track/metadata?guid=online:lx:kw:err")
         assert resp2.status_code == 200
         # /info 失败也必须给出 _h() 可解构的 stub，否则播放器抛错后直接跳过、永不请求 stream
-        _assert_playback_metadata_shape(resp2.json()["data"], guid="online:kuwo:err")
+        _assert_playback_metadata_shape(resp2.json()["data"], guid="online:lx:kw:err")
 
 
-def test_lyric_cache_hit_skips_musicdl():
-    """第一次拉歌词落盘后，再次播放只读 cache/*.lrc，不再请求 musicdl。"""
+def test_lyric_cache_hit_skips_source():
+    """第一次拉歌词落盘后，再次播放只读 cache/*.lrc，不再请求源站。"""
     os.makedirs(CONF["cache_dir"], exist_ok=True)
-    lyric_file = os.path.join(CONF["cache_dir"], "online_kuwo_228908.lrc")
+    lyric_file = os.path.join(CONF["cache_dir"], "online_lx_kw_228908.lrc")
     with open(lyric_file, "w", encoding="utf-8") as f:
         f.write("[00:00.00]本地缓存的晴天\n[00:10.00]不再请求源站\n")
 
     def upstream_handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(500)
 
-    def musicdl_handler(request: httpx.Request) -> httpx.Response:
-        pytest.fail("musicdl should not be called when local lyric cache exists")
-
     app.state.upstream_client = httpx.AsyncClient(
         transport=httpx.MockTransport(upstream_handler), base_url="http://unix"
     )
-    app.state.musicdl_client = httpx.AsyncClient(
-        transport=httpx.MockTransport(musicdl_handler), base_url="http://127.0.0.1:8768"
-    )
 
     with TestClient(app) as client:
-        resp = client.get("/music/api/v1/lyric/list?trackGUID=online:kuwo:228908")
+        resp = client.get("/music/api/v1/lyric/list?trackGUID=online:lx:kw:228908")
         assert resp.status_code == 200
         item = resp.json()["data"]["list"][0]
         assert "本地缓存的晴天" in item["content"]
 
-        resp2 = client.get("/music/api/v1/track/lyrics?guid=online:kuwo:228908")
+        resp2 = client.get("/music/api/v1/track/lyrics?guid=online:lx:kw:228908")
         assert "本地缓存的晴天" in resp2.json()["data"]["lyric"]
 
 
-def test_lyric_list_persists_sidecar():
-    """首次 /lyric/list 从 musicdl 取回后落 .lrc；无音频时只落 cache，不进曲库（孤儿歌词修复）。"""
+def test_lyric_list_persists_sidecar(monkeypatch):
+    """首次 /lyric/list 从源站取回后落 .lrc；无音频时只落 cache，不进曲库（孤儿歌词修复）。"""
+    monkeypatch.setitem(CONF, "lx_enabled", True)
+
     def upstream_handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(500)
 
     info_calls = {"n": 0}
 
-    def musicdl_handler(request: httpx.Request) -> httpx.Response:
-        if request.url.path == "/info":
+    def lx_handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/v1/track/info":
             info_calls["n"] += 1
+            return httpx.Response(200, json={"ok": True, "data": {
+                "id": "lx:kw:228908", "lx_source": "kw", "title": "晴天", "artist": "周杰伦",
+                "album": "叶惠美", "duration_s": 269.0, "ext": "mp3", "cover_url": "", "lyric": ""}})
+        if request.url.path == "/api/v1/track/lyric":
             return httpx.Response(
-                200,
-                json={
-                    "ok": True,
-                    "id": "kuwo:228908",
-                    "title": "晴天",
-                    "artist": "周杰伦",
-                    "lyric": "[00:00.00]晴天 - 周杰伦\n",
-                },
-            )
+                200, json={"ok": True, "data": {"id": "lx:kw:228908", "lyric": "[00:00.00]晴天 - 周杰伦\n"}})
         return httpx.Response(404)
 
     app.state.upstream_client = httpx.AsyncClient(
         transport=httpx.MockTransport(upstream_handler), base_url="http://unix"
     )
-    app.state.musicdl_client = httpx.AsyncClient(
-        transport=httpx.MockTransport(musicdl_handler), base_url="http://127.0.0.1:8768"
+    app.state.lx_client = httpx.AsyncClient(
+        transport=httpx.MockTransport(lx_handler), base_url="http://127.0.0.1:8772"
     )
 
     with TestClient(app) as client:
-        resp = client.get("/music/api/v1/lyric/list?trackGUID=online:kuwo:228908")
+        resp = client.get("/music/api/v1/lyric/list?trackGUID=online:lx:kw:228908")
         assert resp.status_code == 200
         assert info_calls["n"] == 1
-        lyric_file = os.path.join(CONF["cache_dir"], "online_kuwo_228908.lrc")
+        lyric_file = os.path.join(CONF["cache_dir"], "online_lx_kw_228908.lrc")
         assert os.path.exists(lyric_file)
         with open(lyric_file, encoding="utf-8") as f:
             assert "晴天" in f.read()
         assert not any(f.endswith(".lrc") for f in os.listdir(CONF["library_dir"]))
 
-        resp2 = client.get("/music/api/v1/lyric/list?trackGUID=online:kuwo:228908")
+        resp2 = client.get("/music/api/v1/lyric/list?trackGUID=online:lx:kw:228908")
         assert "晴天" in resp2.json()["data"]["list"][0]["content"]
         assert info_calls["n"] == 1
 
 
 def test_ext_healthz():
-    """自身端点 /_ext/healthz 探测 upstream 和 musicdl。"""
+    """自身端点 /_ext/healthz 探测 upstream 与已启用音源。"""
     def upstream_handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json={"code": 0})
-
-    def musicdl_handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, json={"ok": True})
 
     def musicbox_handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json={"ok": True})
 
     app.state.upstream_client = httpx.AsyncClient(
         transport=httpx.MockTransport(upstream_handler), base_url="http://unix"
-    )
-    app.state.musicdl_client = httpx.AsyncClient(
-        transport=httpx.MockTransport(musicdl_handler), base_url="http://127.0.0.1:8768"
     )
     app.state.musicbox_client = httpx.AsyncClient(
         transport=httpx.MockTransport(musicbox_handler), base_url="http://127.0.0.1:8770"
@@ -1000,7 +951,6 @@ def test_ext_healthz():
         rj = resp.json()
         assert rj["ok"] is True
         assert rj["upstream"] == "ok"
-        assert rj["musicdl"] == "ok"
         assert rj["musicbox"] == "ok"
 
 
@@ -1009,7 +959,6 @@ def test_search_track_late_wait_first_source_completed(monkeypatch):
     monkeypatch.setitem(CONF, "search_timeout", 2.0)
     monkeypatch.setitem(CONF, "search_debounce_s", 0.0)
     monkeypatch.setitem(CONF, "lx_enabled", True)
-    monkeypatch.setitem(CONF, "musicdl_enabled", True)
     monkeypatch.setitem(CONF, "netease_enabled", True)
 
     def upstream_handler(request: httpx.Request) -> httpx.Response:
@@ -1036,39 +985,27 @@ def test_search_track_late_wait_first_source_completed(monkeypatch):
         await asyncio.sleep(0.8)  # 极慢，不应该被本次首屏等待
         return httpx.Response(200, json={"ok": True, "data": []})
 
-    async def musicdl_handler(request: httpx.Request) -> httpx.Response:
-        import asyncio
-        await asyncio.sleep(0.15)  # 率先在超时外阶段返回
-        return httpx.Response(
-            200,
-            json={
-                "ok": True,
-                "items": [
-                    {
-                        "id": "kuwo:first_win",
-                        "source": "kuwo",
-                        "title": "晴天 (Live)",
-                        "artist": "刘瑞琦",
-                        "duration_s": 260,
-                        "ext": "mp3",
-                    }
-                ],
-            },
-        )
-
     async def lx_handler(request: httpx.Request) -> httpx.Response:
         import asyncio
-        await asyncio.sleep(0.5)  # 慢于 musicdl
-        return httpx.Response(200, json={"ok": True, "items": []})
+        await asyncio.sleep(0.1)  # 快源先返回
+        return httpx.Response(200, json={"ok": True, "items": [
+            {
+                "id": "lx:kg:first_win",
+                "source": "lx",
+                "lx_source": "kg",
+                "title": "晴天 (Live)",
+                "artist": "刘瑞琦",
+                "album": "",
+                "duration_s": 240,
+                "ext": "mp3",
+            }
+        ]})
 
     app.state.upstream_client = httpx.AsyncClient(
         transport=httpx.MockTransport(upstream_handler), base_url="http://unix"
     )
     app.state.musicbox_client = httpx.AsyncClient(
         transport=httpx.MockTransport(musicbox_handler), base_url="http://127.0.0.1:8770"
-    )
-    app.state.musicdl_client = httpx.AsyncClient(
-        transport=httpx.MockTransport(musicdl_handler), base_url="http://127.0.0.1:8768"
     )
     app.state.lx_client = httpx.AsyncClient(
         transport=httpx.MockTransport(lx_handler), base_url="http://127.0.0.1:8772"
@@ -1081,9 +1018,9 @@ def test_search_track_late_wait_first_source_completed(monkeypatch):
         # 本地保持在第一项
         assert items[0]["guid"] == "local:101"
         assert items[0]["title"] == "晴天"
-        # 率先返回的 musicdl 被并入
-        assert items[1]["guid"] == fake_official_guid("online:kuwo:first_win")
-        assert items[1]["title"] == "[dl] 晴天 (Live)"
+        # 率先返回的洛雪结果被并入
+        assert items[1]["guid"] == fake_official_guid("online:lx:kg:first_win")
+        assert "晴天 (Live)" in items[1]["title"]
         assert items[1]["artist"] == "刘瑞琦"
 
 
@@ -1093,10 +1030,9 @@ def test_search_cache_ttl_default_seven_days():
 
 
 def test_search_track_within_budget_keeps_order(monkeypatch):
-    """在阶段一预算内（3s），所有返回的源均保留，并按 本地 > 网易云 > musicdl > 洛雪 排序与去重。"""
+    """在阶段一预算内（3s），所有返回的源均保留，并按 本地 > 网易云 > 洛雪 排序与去重。"""
     monkeypatch.setitem(CONF, "netease_wait_s", 1.0)
     monkeypatch.setitem(CONF, "lx_enabled", True)
-    monkeypatch.setitem(CONF, "musicdl_enabled", True)
     monkeypatch.setitem(CONF, "netease_enabled", True)
 
     def upstream_handler(request: httpx.Request) -> httpx.Response:
@@ -1140,32 +1076,6 @@ def test_search_track_within_budget_keeps_order(monkeypatch):
             },
         )
 
-    async def musicdl_handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(
-            200,
-            json={
-                "ok": True,
-                "items": [
-                    {
-                        "id": "kuwo:mdl_same",
-                        "source": "kuwo",
-                        "title": "晴天",
-                        "artist": "网易翻唱歌手",  # 与网易云重复，网易云优先
-                        "duration_s": 200,
-                        "ext": "mp3",
-                    },
-                    {
-                        "id": "kuwo:mdl_unique",
-                        "source": "kuwo",
-                        "title": "晴天",
-                        "artist": "Musicdl翻唱歌手",
-                        "duration_s": 210,
-                        "ext": "mp3",
-                    },
-                ],
-            },
-        )
-
     async def lx_handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(
             200,
@@ -1190,9 +1100,6 @@ def test_search_track_within_budget_keeps_order(monkeypatch):
     app.state.musicbox_client = httpx.AsyncClient(
         transport=httpx.MockTransport(musicbox_handler), base_url="http://127.0.0.1:8770"
     )
-    app.state.musicdl_client = httpx.AsyncClient(
-        transport=httpx.MockTransport(musicdl_handler), base_url="http://127.0.0.1:8768"
-    )
     app.state.lx_client = httpx.AsyncClient(
         transport=httpx.MockTransport(lx_handler), base_url="http://127.0.0.1:8772"
     )
@@ -1207,13 +1114,10 @@ def test_search_track_within_budget_keeps_order(monkeypatch):
         # 2. 网易云
         assert items[1]["guid"] == fake_official_guid("online:netease:mb_unique")
         assert items[1]["artist"] == "网易翻唱歌手"
-        # Unknown musicbox duration cannot prove this is the same recording.
-        assert items[2]["guid"] == fake_official_guid("online:kuwo:mdl_same")
-        assert items[3]["guid"] == fake_official_guid("online:kuwo:mdl_unique")
-        assert items[3]["artist"] == "Musicdl翻唱歌手"
-        assert items[4]["guid"] == fake_official_guid("online:lx:kg:lx_unique")
-        assert items[4]["artist"] == "洛雪翻唱歌手"
-        assert len(items) == 5
+        # 3. 洛雪
+        assert items[2]["guid"] == fake_official_guid("online:lx:kg:lx_unique")
+        assert items[2]["artist"] == "洛雪翻唱歌手"
+        assert len(items) == 3
 
 
 
@@ -1246,10 +1150,6 @@ def test_search_track_strict_local_first_pagination():
     )
     app.state.musicbox_client = httpx.AsyncClient(
         transport=httpx.MockTransport(musicbox_handler), base_url="http://127.0.0.1:8770"
-    )
-    app.state.musicdl_client = httpx.AsyncClient(
-        transport=httpx.MockTransport(lambda r: httpx.Response(200, json={"ok": True, "items": []})),
-        base_url="http://127.0.0.1:8768",
     )
 
     with TestClient(app) as client:
@@ -1307,10 +1207,6 @@ def test_search_track_official_clamp_out_of_range_page():
     app.state.musicbox_client = httpx.AsyncClient(
         transport=httpx.MockTransport(musicbox_handler), base_url="http://127.0.0.1:8770"
     )
-    app.state.musicdl_client = httpx.AsyncClient(
-        transport=httpx.MockTransport(lambda r: httpx.Response(200, json={"ok": True, "items": []})),
-        base_url="http://127.0.0.1:8768",
-    )
 
     with TestClient(app) as client:
         seen = []
@@ -1341,14 +1237,8 @@ def test_general_passthrough():
         assert request.headers.get("authorization") == "Bearer mytoken123"
         return httpx.Response(200, json={"code": 0, "data": {"username": "admin"}})
 
-    def musicdl_handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(500)
-
     app.state.upstream_client = httpx.AsyncClient(
         transport=httpx.MockTransport(upstream_handler), base_url="http://unix"
-    )
-    app.state.musicdl_client = httpx.AsyncClient(
-        transport=httpx.MockTransport(musicdl_handler), base_url="http://127.0.0.1:8768"
     )
 
     with TestClient(app) as client:
@@ -1361,27 +1251,12 @@ def test_general_passthrough():
 
 
 def test_search_suggest_merge(monkeypatch):
-    """测试 search/suggest 开启与关闭配置。"""
+    """search/suggest 一律原样透传上游候选列表（不再并入在线搜索）。"""
     def upstream_handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json={"code": 0, "msg": "ok", "data": ["本地周杰伦"]})
 
-    def musicdl_handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(
-            200,
-            json={
-                "ok": True,
-                "items": [
-                    {"title": "周杰伦 晴天"},
-                    {"title": "周杰伦 七里香"},
-                ],
-            },
-        )
-
     app.state.upstream_client = httpx.AsyncClient(
         transport=httpx.MockTransport(upstream_handler), base_url="http://unix"
-    )
-    app.state.musicdl_client = httpx.AsyncClient(
-        transport=httpx.MockTransport(musicdl_handler), base_url="http://127.0.0.1:8768"
     )
 
     # 默认关闭
@@ -1390,12 +1265,12 @@ def test_search_suggest_merge(monkeypatch):
         assert resp.status_code == 200
         assert resp.json()["data"] == ["本地周杰伦"]
 
-    # 开启 suggest 合并
+    # 开启 suggest 合并：候选以官方返回为准
     monkeypatch.setitem(CONF, "merge_suggest", True)
     with TestClient(app) as client:
         resp = client.get("/music/api/v1/search/suggest?keyword=周杰伦")
         assert resp.status_code == 200
-        assert resp.json()["data"] == ["本地周杰伦", "周杰伦 晴天", "周杰伦 七里香"]
+        assert resp.json()["data"] == ["本地周杰伦"]
 
 
 def test_online_hls_playlist():
@@ -1404,17 +1279,8 @@ def test_online_hls_playlist():
     def upstream_handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(500)
 
-    def musicdl_handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(
-            200,
-            json={"ok": True, "duration_s": 269, "ext": "mp3", "title": "晴天"},
-        )
-
     app.state.upstream_client = httpx.AsyncClient(
         transport=httpx.MockTransport(upstream_handler), base_url="http://unix"
-    )
-    app.state.musicdl_client = httpx.AsyncClient(
-        transport=httpx.MockTransport(musicdl_handler), base_url="http://127.0.0.1:8768"
     )
 
     with TestClient(app) as client:
@@ -1432,14 +1298,8 @@ def test_online_transcode_ready():
     def upstream_handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(500)
 
-    def musicdl_handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, json={"ok": True})
-
     app.state.upstream_client = httpx.AsyncClient(
         transport=httpx.MockTransport(upstream_handler), base_url="http://unix"
-    )
-    app.state.musicdl_client = httpx.AsyncClient(
-        transport=httpx.MockTransport(musicdl_handler), base_url="http://127.0.0.1:8768"
     )
 
     with TestClient(app) as client:
@@ -1458,41 +1318,33 @@ def test_online_transcode_ready():
         assert hb.json()["code"] == 0
 
 
-def test_favorite_track_create_online_authorized():
+def test_favorite_track_create_online_authorized(monkeypatch):
     """用例 1: create online: 上游 mock 已登录(user/me 200 code:0 guid:user-a)，本地返回 code:0，fav 文件落盘。"""
+    monkeypatch.setitem(CONF, "lx_enabled", True)
+
     def upstream_handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/music/api/v1/user/me":
             return httpx.Response(200, json={"code": 0, "msg": "ok", "data": {"guid": "user-a", "name": "admin"}})
         return httpx.Response(500, text="Unexpected upstream call")
 
-    def musicdl_handler(request: httpx.Request) -> httpx.Response:
-        if request.url.path == "/info":
-            return httpx.Response(
-                200,
-                json={
-                    "ok": True,
-                    "id": "kuwo:228908",
-                    "source": "kuwo",
-                    "title": "晴天",
-                    "artist": "周杰伦",
-                    "album": "叶惠美",
-                    "duration_s": 269,
-                    "ext": "mp3",
-                },
-            )
+    def lx_handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/v1/track/info":
+            return httpx.Response(200, json={"ok": True, "data": {
+                "id": "lx:kg:228908", "lx_source": "kg", "title": "晴天", "artist": "周杰伦",
+                "album": "叶惠美", "duration_s": 269.0, "ext": "mp3", "cover_url": ""}})
         return httpx.Response(404)
 
     app.state.upstream_client = httpx.AsyncClient(
         transport=httpx.MockTransport(upstream_handler), base_url="http://unix"
     )
-    app.state.musicdl_client = httpx.AsyncClient(
-        transport=httpx.MockTransport(musicdl_handler), base_url="http://127.0.0.1:8768"
+    app.state.lx_client = httpx.AsyncClient(
+        transport=httpx.MockTransport(lx_handler), base_url="http://127.0.0.1:8772"
     )
 
     with TestClient(app) as client:
         resp = client.post(
             "/music/api/v1/favorite-track/create",
-            json={"trackGUID": "online:kuwo:228908"},
+            json={"trackGUID": "online:lx:kg:228908"},
             cookies={"music-token": "valid_token"},
         )
         assert resp.status_code == 200
@@ -1506,7 +1358,7 @@ def test_favorite_track_create_online_authorized():
             saved = json.load(f)
         assert len(saved["items"]) == 1
         item = saved["items"][0]
-        assert item["guid"] == "online:kuwo:228908"
+        assert item["guid"] == "online:lx:kg:228908"
         track = item["track"]
         assert track["title"] == "晴天"
         assert track["artists"][0]["name"] == "周杰伦"
@@ -1523,14 +1375,8 @@ def test_favorite_track_create_online_unauthorized():
             return httpx.Response(200, json={"code": 99999, "msg": "INVALID TOKEN", "data": None})
         return httpx.Response(500)
 
-    def musicdl_handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(500)
-
     app.state.upstream_client = httpx.AsyncClient(
         transport=httpx.MockTransport(upstream_handler), base_url="http://unix"
-    )
-    app.state.musicdl_client = httpx.AsyncClient(
-        transport=httpx.MockTransport(musicdl_handler), base_url="http://127.0.0.1:8768"
     )
 
     with TestClient(app) as client:
@@ -1553,14 +1399,8 @@ def test_favorite_track_create_local_passthrough():
             return httpx.Response(200, json={"code": 0, "msg": "", "data": None})
         return httpx.Response(500)
 
-    def musicdl_handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(500)
-
     app.state.upstream_client = httpx.AsyncClient(
         transport=httpx.MockTransport(upstream_handler), base_url="http://unix"
-    )
-    app.state.musicdl_client = httpx.AsyncClient(
-        transport=httpx.MockTransport(musicdl_handler), base_url="http://127.0.0.1:8768"
     )
 
     with TestClient(app) as client:
@@ -1581,16 +1421,8 @@ def test_favorite_track_delete_online():
             return httpx.Response(200, json={"code": 0, "msg": "ok", "data": {"guid": "user-a"}})
         return httpx.Response(500)
 
-    def musicdl_handler(request: httpx.Request) -> httpx.Response:
-        if request.url.path == "/info":
-            return httpx.Response(200, json={"ok": True, "title": "晴天"})
-        return httpx.Response(404)
-
     app.state.upstream_client = httpx.AsyncClient(
         transport=httpx.MockTransport(upstream_handler), base_url="http://unix"
-    )
-    app.state.musicdl_client = httpx.AsyncClient(
-        transport=httpx.MockTransport(musicdl_handler), base_url="http://127.0.0.1:8768"
     )
 
     user_fav = os.path.join(CONF["fav_dir"], "user-a.json")
@@ -1626,8 +1458,10 @@ def test_favorite_track_delete_online():
             assert len(json.load(f)["items"]) == 0
 
 
-def test_favorite_track_list_merge():
+def test_favorite_track_list_merge(monkeypatch):
     """用例 5: list 合并: 官方 mock 1 条本地 + 本地存 1 条在线 → total=2，list 里有在线条目且形状完整。"""
+    monkeypatch.setitem(CONF, "lx_enabled", True)
+
     def upstream_handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/music/api/v1/favorite-track/list":
             data = {
@@ -1653,35 +1487,25 @@ def test_favorite_track_list_merge():
             return httpx.Response(200, json={"code": 0, "data": {"guid": "user-a"}})
         return httpx.Response(500)
 
-    def musicdl_handler(request: httpx.Request) -> httpx.Response:
-        if request.url.path == "/info":
-            return httpx.Response(
-                200,
-                json={
-                    "ok": True,
-                    "id": "migu:600908",
-                    "source": "migu",
-                    "title": "稻香",
-                    "artist": "周杰伦",
-                    "album": "魔杰座",
-                    "duration_s": 223,
-                    "ext": "flac",
-                },
-            )
+    def lx_handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/v1/track/info":
+            return httpx.Response(200, json={"ok": True, "data": {
+                "id": "lx:mg:600908", "lx_source": "mg", "title": "稻香", "artist": "周杰伦",
+                "album": "魔杰座", "duration_s": 223.0, "ext": "flac", "cover_url": ""}})
         return httpx.Response(404)
 
     app.state.upstream_client = httpx.AsyncClient(
         transport=httpx.MockTransport(upstream_handler), base_url="http://unix"
     )
-    app.state.musicdl_client = httpx.AsyncClient(
-        transport=httpx.MockTransport(musicdl_handler), base_url="http://127.0.0.1:8768"
+    app.state.lx_client = httpx.AsyncClient(
+        transport=httpx.MockTransport(lx_handler), base_url="http://127.0.0.1:8772"
     )
 
     with TestClient(app) as client:
         # 存入一条在线收藏
         client.post(
             "/music/api/v1/favorite-track/create",
-            json={"trackGUID": "online:migu:600908"},
+            json={"trackGUID": "online:lx:mg:600908"},
         )
 
         resp = client.get("/music/api/v1/favorite-track/list?page=1&size=100")
@@ -1696,7 +1520,7 @@ def test_favorite_track_list_merge():
         assert items[0]["isFavorite"] is True
         
         online_item = items[1]
-        assert online_item["guid"] == fake_official_guid("online:migu:600908")
+        assert online_item["guid"] == fake_official_guid("online:lx:mg:600908")
         assert online_item["title"] == "稻香"
         assert online_item["duration"] == 223000
         assert online_item["isFavorite"] is True
@@ -1719,16 +1543,8 @@ def test_favorite_track_create_unwritable_fav_dir_safe(monkeypatch):
             return httpx.Response(200, json={"code": 0, "msg": "ok", "data": {"guid": "user-a"}})
         return httpx.Response(500)
 
-    def musicdl_handler(request: httpx.Request) -> httpx.Response:
-        if request.url.path == "/info":
-            return httpx.Response(200, json={"ok": True, "title": "晴天"})
-        return httpx.Response(404)
-
     app.state.upstream_client = httpx.AsyncClient(
         transport=httpx.MockTransport(upstream_handler), base_url="http://unix"
-    )
-    app.state.musicdl_client = httpx.AsyncClient(
-        transport=httpx.MockTransport(musicdl_handler), base_url="http://127.0.0.1:8768"
     )
 
     # 将 fav_dir 设置为文件路径而非目录，使在其中创建文件失败
@@ -1805,14 +1621,8 @@ def test_favorite_track_list_upstream_unauthorized():
             return httpx.Response(200, json={"code": 99999, "msg": "INVALID TOKEN", "data": None})
         return httpx.Response(500)
 
-    def musicdl_handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(500)
-
     app.state.upstream_client = httpx.AsyncClient(
         transport=httpx.MockTransport(upstream_handler), base_url="http://unix"
-    )
-    app.state.musicdl_client = httpx.AsyncClient(
-        transport=httpx.MockTransport(musicdl_handler), base_url="http://127.0.0.1:8768"
     )
 
     with TestClient(app) as client:
@@ -1831,14 +1641,8 @@ def test_favorite_track_delete_local_passthrough():
             return httpx.Response(200, json={"code": 0, "msg": "", "data": None})
         return httpx.Response(500)
 
-    def musicdl_handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(500)
-
     app.state.upstream_client = httpx.AsyncClient(
         transport=httpx.MockTransport(upstream_handler), base_url="http://unix"
-    )
-    app.state.musicdl_client = httpx.AsyncClient(
-        transport=httpx.MockTransport(musicdl_handler), base_url="http://127.0.0.1:8768"
     )
 
     with TestClient(app) as client:
@@ -1862,18 +1666,8 @@ def test_user_isolation_create_and_list():
             return httpx.Response(200, json={"code": 0, "data": {"list": [], "total": 0}})
         return httpx.Response(500)
 
-    def musicdl_handler(request: httpx.Request) -> httpx.Response:
-        if request.url.path == "/info":
-            gid = request.url.params.get("id")
-            title = "A的歌曲" if "aaa" in str(gid) else "B的歌曲"
-            return httpx.Response(200, json={"ok": True, "title": title})
-        return httpx.Response(404)
-
     app.state.upstream_client = httpx.AsyncClient(
         transport=httpx.MockTransport(upstream_handler), base_url="http://unix"
-    )
-    app.state.musicdl_client = httpx.AsyncClient(
-        transport=httpx.MockTransport(musicdl_handler), base_url="http://127.0.0.1:8768"
     )
 
     with TestClient(app) as client:
@@ -1924,16 +1718,8 @@ def test_user_isolation_delete():
             return httpx.Response(200, json={"code": 0, "data": {"list": [], "total": 0}})
         return httpx.Response(500)
 
-    def musicdl_handler(request: httpx.Request) -> httpx.Response:
-        if request.url.path == "/info":
-            return httpx.Response(200, json={"ok": True, "title": "公共在线曲目"})
-        return httpx.Response(404)
-
     app.state.upstream_client = httpx.AsyncClient(
         transport=httpx.MockTransport(upstream_handler), base_url="http://unix"
-    )
-    app.state.musicdl_client = httpx.AsyncClient(
-        transport=httpx.MockTransport(musicdl_handler), base_url="http://127.0.0.1:8768"
     )
 
     with TestClient(app) as client:
@@ -1971,16 +1757,8 @@ def test_user_me_missing_guid_fallback_shared():
             return httpx.Response(200, json={"code": 0, "data": {"list": [], "total": 0}})
         return httpx.Response(500)
 
-    def musicdl_handler(request: httpx.Request) -> httpx.Response:
-        if request.url.path == "/info":
-            return httpx.Response(200, json={"ok": True, "title": "兜底歌曲"})
-        return httpx.Response(404)
-
     app.state.upstream_client = httpx.AsyncClient(
         transport=httpx.MockTransport(upstream_handler), base_url="http://unix"
-    )
-    app.state.musicdl_client = httpx.AsyncClient(
-        transport=httpx.MockTransport(musicdl_handler), base_url="http://127.0.0.1:8768"
     )
 
     with TestClient(app) as client:
@@ -2020,26 +1798,20 @@ def test_user_guid_sanitization():
 
 
 def test_static_cover_online_coverid_redirect(monkeypatch):
-    """测试 1: mock musicdl /info 返回 cover_url，GET /static/cover?coverId=online:migu:123&size=120
+    """测试 1: mock 洛雪 /info 返回 cover_url，GET /static/cover?coverId=online:lx:mg:123&size=120
     → 同源直出图片字节（issue #48：App 不跟随跨域 302），不再 302 外链。"""
+    monkeypatch.setitem(CONF, "lx_enabled", True)
     cover_target = "http://img.music.migu.cn/cover123.jpg"
 
     def upstream_handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(400, text="Should not reach upstream")
 
-    def musicdl_handler(request: httpx.Request) -> httpx.Response:
-        assert request.url.path == "/info"
-        assert request.url.params.get("id") == "migu:123"
-        return httpx.Response(
-            200,
-            json={
-                "ok": True,
-                "id": "migu:123",
-                "title": "测试歌曲",
-                "artist": "歌手",
-                "cover_url": cover_target,
-            },
-        )
+    def lx_handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/v1/track/info":
+            return httpx.Response(200, json={"ok": True, "data": {
+                "id": "lx:mg:123", "lx_source": "mg", "title": "晴天", "artist": "周杰伦",
+                "album": "叶惠美", "duration_s": 269.0, "ext": "mp3", "cover_url": cover_target}})
+        return httpx.Response(404)
 
     def img_handler(request: httpx.Request) -> httpx.Response:
         assert str(request.url) == cover_target
@@ -2048,14 +1820,14 @@ def test_static_cover_online_coverid_redirect(monkeypatch):
     app.state.upstream_client = httpx.AsyncClient(
         transport=httpx.MockTransport(upstream_handler), base_url="http://unix"
     )
-    app.state.musicdl_client = httpx.AsyncClient(
-        transport=httpx.MockTransport(musicdl_handler), base_url="http://127.0.0.1:8768"
+    app.state.lx_client = httpx.AsyncClient(
+        transport=httpx.MockTransport(lx_handler), base_url="http://127.0.0.1:8772"
     )
     monkeypatch.setattr("proxy.app._COVER_FETCH_ASYNC_TRANSPORT", httpx.MockTransport(img_handler))
 
     with TestClient(app) as client:
         resp = client.get(
-            "/music/api/v1/static/cover?coverId=online:migu:123&size=120",
+            "/music/api/v1/static/cover?coverId=online:lx:mg:123&size=120",
             follow_redirects=False,
         )
         assert resp.status_code == 200
@@ -2077,14 +1849,8 @@ def test_static_cover_local_coverid_passthrough():
             headers={"content-type": "image/png"},
         )
 
-    def musicdl_handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(500, text="Should not reach musicdl")
-
     app.state.upstream_client = httpx.AsyncClient(
         transport=httpx.MockTransport(upstream_handler), base_url="http://unix"
-    )
-    app.state.musicdl_client = httpx.AsyncClient(
-        transport=httpx.MockTransport(musicdl_handler), base_url="http://127.0.0.1:8768"
     )
 
     with TestClient(app) as client:
@@ -2118,28 +1884,8 @@ def test_favorite_track_list_official_items_populate_is_favorite_and_empty_handl
             return httpx.Response(200, json={"code": 0, "data": {"guid": "user-fav-test"}})
         return httpx.Response(500)
 
-    def musicdl_handler(request: httpx.Request) -> httpx.Response:
-        if request.url.path == "/info":
-            return httpx.Response(
-                200,
-                json={
-                    "ok": True,
-                    "id": "netease:12345",
-                    "source": "netease",
-                    "title": "测试网易曲目",
-                    "artist": "歌手A",
-                    "album": "专辑A",
-                    "duration_s": 180,
-                    "ext": "mp3",
-                },
-            )
-        return httpx.Response(404)
-
     app.state.upstream_client = httpx.AsyncClient(
         transport=httpx.MockTransport(upstream_handler), base_url="http://unix"
-    )
-    app.state.musicdl_client = httpx.AsyncClient(
-        transport=httpx.MockTransport(musicdl_handler), base_url="http://127.0.0.1:8768"
     )
 
     with TestClient(app) as client:
@@ -2219,15 +1965,15 @@ def test_merge_online_tracks_filters_unplayable_defense():
     upstream_json = {"code": 0, "msg": "OK", "data": {"list": [], "total": 0}}
     online_data = [
         {"id": "netease:1", "title": "枫 (试听)", "artist": "周杰伦", "duration_s": 200},
-        {"id": "kuwo:2", "title": "搁浅", "artist": "周杰伦", "download_url": "", "duration_s": 200},
-        {"id": "kuwo:3", "title": "退后", "artist": "周杰伦", "download_url": "http://cdn.com/3.mp3", "duration_s": 250},
+        {"id": "netease:2", "title": "搁浅", "artist": "周杰伦", "download_url": "", "duration_s": 200},
+        {"id": "netease:3", "title": "退后", "artist": "周杰伦", "download_url": "http://cdn.com/3.mp3", "duration_s": 250},
     ]
     merged = merge_online_tracks(upstream_json, online_data)
     items = merged["data"]["list"]
     # 只有有效且可播的退后 (id=3) 会被合并
     assert len(items) == 1
-    assert items[0]["guid"] == "online:kuwo:3"
-    assert items[0]["title"] == "[dl] 退后"
+    assert items[0]["guid"] == "online:netease:3"
+    assert items[0]["title"] == "[music box] 退后"
 
 
 
@@ -2500,26 +2246,22 @@ def test_search_track_pagination_no_cross_page_duplication():
         # 无论 page/size 如何都返回同样 11 条（官方钳制 + 忽略 size 的真实行为）
         return httpx.Response(200, json={"code": 0, "data": {"list": local_tracks, "total": 11}})
 
-    def musicbox_handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(404, json={"ok": False})
-
     online_items = [
-        {"id": f"kuwo:{900 + i}", "source": "kuwo", "title": f"在线歌{i}", "artist": "周杰伦",
-         "album": "叶惠美", "duration_s": 250, "ext": "mp3"}
+        {"song_id": f"mb_{i}", "song_name": f"在线歌{i}", "artist": "周杰伦",
+         "album_name": "叶惠美", "duration": 250}
         for i in range(6)
     ]
 
-    def musicdl_handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, json={"ok": True, "items": online_items})
+    def musicbox_handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/v1/songs/detail":
+            return httpx.Response(200, json={"ok": True, "data": []})
+        return httpx.Response(200, json={"ok": True, "data": online_items})
 
     app.state.upstream_client = httpx.AsyncClient(
         transport=httpx.MockTransport(upstream_handler), base_url="http://unix"
     )
     app.state.musicbox_client = httpx.AsyncClient(
         transport=httpx.MockTransport(musicbox_handler), base_url="http://127.0.0.1:8770"
-    )
-    app.state.musicdl_client = httpx.AsyncClient(
-        transport=httpx.MockTransport(musicdl_handler), base_url="http://127.0.0.1:8768"
     )
 
     with TestClient(app) as client:
@@ -2552,17 +2294,11 @@ def test_search_track_pagination_respected_size_untouched():
     def musicbox_handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(404, json={"ok": False})
 
-    def musicdl_handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, json={"ok": True, "items": []})
-
     app.state.upstream_client = httpx.AsyncClient(
         transport=httpx.MockTransport(upstream_handler), base_url="http://unix"
     )
     app.state.musicbox_client = httpx.AsyncClient(
         transport=httpx.MockTransport(musicbox_handler), base_url="http://127.0.0.1:8770"
-    )
-    app.state.musicdl_client = httpx.AsyncClient(
-        transport=httpx.MockTransport(musicdl_handler), base_url="http://127.0.0.1:8768"
     )
 
     with TestClient(app) as client:
@@ -2597,10 +2333,7 @@ def _deep_page_handlers(pool_size: int, offsets_seen: list):
             json={"ok": True, "data": pool[offset:offset + limit]},
         )
 
-    def musicdl_handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, json={"ok": True, "items": []})
-
-    return upstream_handler, musicbox_handler, musicdl_handler
+    return upstream_handler, musicbox_handler
 
 
 def test_search_track_deep_pagination_user_scenario():
@@ -2608,16 +2341,13 @@ def test_search_track_deep_pagination_user_scenario():
     每页 50 在线；在线池越过首屏时按 offset=50/100/150 向网易增量取页，上游
     取尽后末页短页、total 稳定、后续页为空且不再打上游。"""
     offsets_seen: list[int] = []
-    upstream_handler, musicbox_handler, musicdl_handler = _deep_page_handlers(200, offsets_seen)
+    upstream_handler, musicbox_handler = _deep_page_handlers(200, offsets_seen)
 
     app.state.upstream_client = httpx.AsyncClient(
         transport=httpx.MockTransport(upstream_handler), base_url="http://unix"
     )
     app.state.musicbox_client = httpx.AsyncClient(
         transport=httpx.MockTransport(musicbox_handler), base_url="http://127.0.0.1:8770"
-    )
-    app.state.musicdl_client = httpx.AsyncClient(
-        transport=httpx.MockTransport(musicdl_handler), base_url="http://127.0.0.1:8768"
     )
 
     with TestClient(app) as client:
@@ -2660,16 +2390,13 @@ def test_search_track_deep_pagination_disabled(monkeypatch):
     """深分页关闭：越过首屏池不再打上游（offset 恒 0），在线段只余首屏尾段。"""
     monkeypatch.setitem(CONF, "search_deep_page", False)
     offsets_seen: list[int] = []
-    upstream_handler, musicbox_handler, musicdl_handler = _deep_page_handlers(200, offsets_seen)
+    upstream_handler, musicbox_handler = _deep_page_handlers(200, offsets_seen)
 
     app.state.upstream_client = httpx.AsyncClient(
         transport=httpx.MockTransport(upstream_handler), base_url="http://unix"
     )
     app.state.musicbox_client = httpx.AsyncClient(
         transport=httpx.MockTransport(musicbox_handler), base_url="http://127.0.0.1:8770"
-    )
-    app.state.musicdl_client = httpx.AsyncClient(
-        transport=httpx.MockTransport(musicdl_handler), base_url="http://127.0.0.1:8768"
     )
 
     with TestClient(app) as client:
@@ -2686,16 +2413,13 @@ def test_search_track_deep_pagination_disabled(monkeypatch):
 def test_search_track_single_page_under_size():
     """总量 ≤ 一页（30 本地 + 20 在线 = 50）时不分页：第 1 页装下全部，第 2 页空。"""
     offsets_seen: list[int] = []
-    upstream_handler, musicbox_handler, musicdl_handler = _deep_page_handlers(20, offsets_seen)
+    upstream_handler, musicbox_handler = _deep_page_handlers(20, offsets_seen)
 
     app.state.upstream_client = httpx.AsyncClient(
         transport=httpx.MockTransport(upstream_handler), base_url="http://unix"
     )
     app.state.musicbox_client = httpx.AsyncClient(
         transport=httpx.MockTransport(musicbox_handler), base_url="http://127.0.0.1:8770"
-    )
-    app.state.musicdl_client = httpx.AsyncClient(
-        transport=httpx.MockTransport(musicdl_handler), base_url="http://127.0.0.1:8768"
     )
 
     with TestClient(app) as client:

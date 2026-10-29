@@ -16,7 +16,7 @@ def _function(text, name):
     return text[start:text.index("\n}", start) + 2] + "\n"
 
 
-@pytest.mark.parametrize("provider", ["musicdl", "musicbox", "lxmusic"])
+@pytest.mark.parametrize("provider", ["musicbox", "lxmusic"])
 @pytest.mark.parametrize("has_results", [True, False], ids=["search-id", "empty-search"])
 def test_acceptance_only_auth_and_search_no_download(tmp_path, provider, has_results):
     bindir = tmp_path / "bin"
@@ -60,17 +60,14 @@ log_warn() { printf 'warn %s\\n' "$*"; }
 log_err() { printf 'error %s\\n' "$*" >&2; }
 get_fnos_gateway_ports() { printf '8080 8443\\n'; }
 '''
-    script += _function(extend, "warn_unregistered_mdl_platforms")
     script += _function(extend, "verify_acceptance")
     script += "verify_acceptance\n"
     env = {
         "PATH": str(bindir), "HOME": str(tmp_path), "TMPDIR": str(tmp_path),
         "REQUEST_LOG": str(calls), "HAS_RESULTS": str(int(has_results)),
         "TARGET_SOCK": str(tmp_path / "unused.sock"),
-        "MUSICDL_URL": "http://musicdl.invalid:8768",
         "MUSICBOX_URL": "http://musicbox.invalid:8770",
         "LX_URL": "http://lxmusic.invalid:8772",
-        "ENABLE_MUSICDL": str(int(provider == "musicdl")),
         "ENABLE_MUSICBOX": str(int(provider == "musicbox")),
         "ENABLE_LX": str(int(provider == "lxmusic")),
         "FNMUSIC_ONLINE_SOURCES": "kuwo,migu", "LX_SOURCES": "kg,wy",
@@ -97,9 +94,7 @@ get_fnos_gateway_ports() { printf '8080 8443\\n'; }
         assert parsed.hostname == provider + ".invalid"
         query = parse_qs(parsed.query)
         assert query["keyword"][0] in ("晴天", "海阔天空", "稻香")
-        if provider == "musicdl":
-            assert query["sources"] == ["kuwo,migu"]
-        elif provider == "lxmusic":
+        if provider == "lxmusic":
             assert query["sources"][0] in ("kg", "wy")
     after = {p.relative_to(library): p.read_bytes() for p in library.rglob("*") if p.is_file()}
     assert after == before

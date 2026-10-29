@@ -27,7 +27,7 @@ from proxy.app import (
     fake_official_guid,
 )
 
-FAKE_KUWO1 = "online:kuwo:228908"
+FAKE_QQ1 = "online:qqmusic:228908"
 PL_CUSTOM = "pl-custom-1"
 OFFICIAL_GUID = "official-guid-1"
 
@@ -59,7 +59,7 @@ def setup_official_bind_env(tmp_path, monkeypatch):
     monkeypatch.setitem(CONF, "cache_dir", dirs["cache"])
     monkeypatch.setitem(CONF, "library_dir", dirs["library"])
     monkeypatch.setitem(CONF, "tee_save_dir", dirs["library"])
-    monkeypatch.setitem(CONF, "musicdl_enabled", True)
+    monkeypatch.setitem(CONF, "qqmusic_enabled", True)
     monkeypatch.setitem(CONF, "lyric_field", "data.lyric")
     monkeypatch.setitem(CONF, "fav_auto_bind", True)
     monkeypatch.setattr(appmod, "_BIND_POLL_INTERVAL_S", 0.05)
@@ -88,18 +88,17 @@ def setup_official_bind_env(tmp_path, monkeypatch):
         base_url="http://unix",
     )
 
-    def musicdl_handler(request: httpx.Request) -> httpx.Response:
-        if request.url.path == "/info":
-            return httpx.Response(200, json={
-                "ok": True, "id": "kuwo:228908", "source": "kuwo",
-                "title": "晴天", "artist": "周杰伦", "album": "叶惠美",
-                "duration_s": 269, "ext": "mp3",
-            })
+    def qqmusic_handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/info"):
+            return httpx.Response(200, json={"ok": True, "data": {
+                "song_name": "晴天", "artist": "周杰伦", "album_name": "叶惠美",
+                "duration": 269, "album_pic_url": "",
+            }})
         return httpx.Response(404)
 
-    app.state.musicdl_client = httpx.AsyncClient(
-        transport=httpx.MockTransport(musicdl_handler),
-        base_url="http://127.0.0.1:8768",
+    app.state.qqmusic_client = httpx.AsyncClient(
+        transport=httpx.MockTransport(qqmusic_handler),
+        base_url="http://127.0.0.1:8775",
     )
     app.state.musicbox_client = httpx.AsyncClient(
         transport=httpx.MockTransport(lambda r: httpx.Response(404, json={"ok": False})),
@@ -175,7 +174,7 @@ def test_favorite_full_bind_writes_official_and_removes_local(env, monkeypatch):
     with TestClient(app) as client:
         resp = client.post(
             "/music/api/v1/favorite-track/create",
-            json={"trackGUID": FAKE_KUWO1},
+            json={"trackGUID": FAKE_QQ1},
             cookies={"music-token": "valid_token"},
         )
         assert resp.status_code == 200
@@ -186,7 +185,7 @@ def test_favorite_full_bind_writes_official_and_removes_local(env, monkeypatch):
     assert posts[0]["json"] == {"trackGUID": OFFICIAL_GUID}
     # 本地映射已删（官方列表唯一显示）；绑定登记记录 fav 标记
     assert appmod.load_online_favorites("user-a") == []
-    entry = appmod.lookup_bind_entry("user-a", FAKE_KUWO1)
+    entry = appmod.lookup_bind_entry("user-a", FAKE_QQ1)
     assert entry and entry["fav"] is True and entry["official"] == OFFICIAL_GUID
 
 
@@ -198,7 +197,7 @@ def test_playlist_full_bind_writes_official_and_removes_local(env, monkeypatch):
     with TestClient(app) as client:
         resp = client.post(
             "/music/api/v1/playlist/add-track",
-            json={"guid": PL_CUSTOM, "trackGUIDs": [fake_official_guid(FAKE_KUWO1)]},
+            json={"guid": PL_CUSTOM, "trackGUIDs": [fake_official_guid(FAKE_QQ1)]},
         )
         assert resp.status_code == 200
         assert resp.json() == {"code": 0, "msg": "", "data": None}
@@ -207,7 +206,7 @@ def test_playlist_full_bind_writes_official_and_removes_local(env, monkeypatch):
     posts = upstream_posts(env["upstream_calls"], "/playlist/add-track")
     assert posts[0]["json"] == {"guid": PL_CUSTOM, "trackGUIDs": [OFFICIAL_GUID]}
     assert appmod.load_playlist_tracks("user-a") == {}
-    entry = appmod.lookup_bind_entry("user-a", FAKE_KUWO1)
+    entry = appmod.lookup_bind_entry("user-a", FAKE_QQ1)
     assert entry and PL_CUSTOM in entry["playlists"]
 
 
@@ -220,7 +219,7 @@ def test_bind_timeout_keeps_local_mapping(env, monkeypatch):
     with TestClient(app) as client:
         resp = client.post(
             "/music/api/v1/favorite-track/create",
-            json={"trackGUID": FAKE_KUWO1},
+            json={"trackGUID": FAKE_QQ1},
             cookies={"music-token": "valid_token"},
         )
         assert resp.status_code == 200
@@ -229,7 +228,7 @@ def test_bind_timeout_keeps_local_mapping(env, monkeypatch):
 
     assert upstream_posts(env["upstream_calls"], "/favorite-track/create") == []
     items = appmod.load_online_favorites("user-a")
-    assert len(items) == 1 and items[0]["guid"] == FAKE_KUWO1 and items[0]["bind"] == "pending"
+    assert len(items) == 1 and items[0]["guid"] == FAKE_QQ1 and items[0]["bind"] == "pending"
 
 
 def test_favorite_during_active_tee_stream_no_duplicate_download(env, monkeypatch):
@@ -241,46 +240,46 @@ def test_favorite_during_active_tee_stream_no_duplicate_download(env, monkeypatc
         recorded.append(guid)
 
     monkeypatch.setattr(appmod, "_full_fetch_download", fake_download)
-    appmod._tee_active[FAKE_KUWO1] = 1
+    appmod._tee_active[FAKE_QQ1] = 1
 
     with TestClient(app) as client:
         resp = client.post(
             "/music/api/v1/favorite-track/create",
-            json={"trackGUID": FAKE_KUWO1},
+            json={"trackGUID": FAKE_QQ1},
             cookies={"music-token": "valid_token"},
         )
         assert resp.status_code == 200
 
     assert recorded == []
-    intent = appmod._bind_pending.get(FAKE_KUWO1, {}).get("user-a")
+    intent = appmod._bind_pending.get(FAKE_QQ1, {}).get("user-a")
     assert intent and intent["fav"] is True
 
 
 def test_stale_fake_guid_unfavorite_forwards_official_delete(env):
     """官方绑定完成后的旧会话伪装 id 取消收藏 → 登记翻译成官方 guid 撤销官方收藏。"""
-    appmod._record_bind("user-a", FAKE_KUWO1, OFFICIAL_GUID)
+    appmod._record_bind("user-a", FAKE_QQ1, OFFICIAL_GUID)
 
     with TestClient(app) as client:
         resp = client.post(
             "/music/api/v1/favorite-track/delete",
-            json={"trackGUID": fake_official_guid(FAKE_KUWO1)},
+            json={"trackGUID": fake_official_guid(FAKE_QQ1)},
         )
         assert resp.status_code == 200
         assert resp.json() == {"code": 0, "msg": "", "data": None}
 
     deletes = upstream_posts(env["upstream_calls"], "/favorite-track/delete")
     assert deletes and deletes[0]["json"] == {"trackGUID": OFFICIAL_GUID}
-    assert appmod.lookup_bind_entry("user-a", FAKE_KUWO1) is None
+    assert appmod.lookup_bind_entry("user-a", FAKE_QQ1) is None
 
 
 def test_playlist_remove_forwards_bound_official(env):
     """旧会话假 id 移出歌单：登记命中 → 并入官方 remove 批次。"""
-    appmod._record_bind("user-a", FAKE_KUWO1, OFFICIAL_GUID, playlist_guid=PL_CUSTOM)
+    appmod._record_bind("user-a", FAKE_QQ1, OFFICIAL_GUID, playlist_guid=PL_CUSTOM)
 
     with TestClient(app) as client:
         resp = client.post(
             "/music/api/v1/playlist/remove-track",
-            json={"guid": PL_CUSTOM, "trackGUIDs": [fake_official_guid(FAKE_KUWO1)]},
+            json={"guid": PL_CUSTOM, "trackGUIDs": [fake_official_guid(FAKE_QQ1)]},
         )
         assert resp.status_code == 200
         assert resp.json() == {"code": 0, "msg": "", "data": None}
@@ -288,7 +287,7 @@ def test_playlist_remove_forwards_bound_official(env):
     removes = upstream_posts(env["upstream_calls"], "/playlist/remove-track")
     assert removes and OFFICIAL_GUID in removes[0]["json"]["trackGUIDs"]
     # 该登记只剩歌单标记：移除转发后整条清空
-    assert appmod.lookup_bind_entry("user-a", FAKE_KUWO1) is None
+    assert appmod.lookup_bind_entry("user-a", FAKE_QQ1) is None
 
 
 def test_favorite_list_view_retries_pending_bind(env, monkeypatch):
@@ -296,11 +295,11 @@ def test_favorite_list_view_retries_pending_bind(env, monkeypatch):
     make_official_db(env["db_path"], with_track=True)
     monkeypatch.setattr(appmod, "find_cache_file", lambda guid: env["dirs"]["library"] + "/f.mp3")
     snapshot = appmod.build_favorite_track_obj(
-        FAKE_KUWO1, {"title": "晴天", "artist": "周杰伦", "album": "叶惠美",
-                     "id": "228908", "source": "kuwo"}, created_at=1,
+        FAKE_QQ1, {"title": "晴天", "artist": "周杰伦", "album": "叶惠美",
+                     "id": "228908", "source": "qqmusic"}, created_at=1,
     )
     appmod.save_online_favorites("user-a", [{
-        "guid": FAKE_KUWO1, "createdAt": 1, "bind": "pending", "track": snapshot,
+        "guid": FAKE_QQ1, "createdAt": 1, "bind": "pending", "track": snapshot,
     }])
 
     with TestClient(app) as client:
@@ -349,12 +348,12 @@ async def test_resume_part_download_appends_and_finalizes(tmp_path, monkeypatch)
     monkeypatch.setattr(appmod, "_dispatch_official_binding",
                         lambda g, h, m: calls.setdefault("dispatch", g))
 
-    ok = await appmod._resume_part_download(FAKE_KUWO1, str(part), 1024, 2048, "mp3", {})
+    ok = await appmod._resume_part_download(FAKE_QQ1, str(part), 1024, 2048, "mp3", {})
     assert ok is True
     assert calls["range"] == "bytes=1024-"
     assert part.read_bytes() == b"a" * 1024 + tail
-    assert calls["finalize"] == (FAKE_KUWO1, "mp3", True)
-    assert calls["dispatch"] == FAKE_KUWO1 and calls["closed"]
+    assert calls["finalize"] == (FAKE_QQ1, "mp3", True)
+    assert calls["dispatch"] == FAKE_QQ1 and calls["closed"]
 
 
 @pytest.mark.anyio
@@ -387,7 +386,7 @@ async def test_resume_part_download_returns_false_when_finalize_rejected(tmp_pat
     monkeypatch.setattr(appmod, "_dispatch_official_binding",
                         lambda g, h, m: calls.setdefault("dispatch", g))
 
-    ok = await appmod._resume_part_download(FAKE_KUWO1, str(part), 1024, 2048, "flac", {})
+    ok = await appmod._resume_part_download(FAKE_QQ1, str(part), 1024, 2048, "flac", {})
     assert ok is False
     assert "scan" not in calls and "dispatch" not in calls
     assert calls.get("closed") is True
@@ -417,8 +416,8 @@ async def test_handoff_falls_back_to_full_download_on_no_range(tmp_path, monkeyp
 
     monkeypatch.setattr(appmod, "_full_fetch_download", fake_full)
 
-    await appmod._tee_handoff_download(FAKE_KUWO1, str(part), 10, 20, "mp3", {})
-    assert calls["full"] == (FAKE_KUWO1, True)  # 续传失败回退整轨重下时旁路 lx 直链缓存
+    await appmod._tee_handoff_download(FAKE_QQ1, str(part), 10, 20, "mp3", {})
+    assert calls["full"] == (FAKE_QQ1, True)  # 续传失败回退整轨重下时旁路 lx 直链缓存
     assert not os.path.exists(part)
 
 
@@ -438,7 +437,7 @@ async def test_disconnect_mid_stream_hands_off_part(env, monkeypatch):
 
     resp = httpx.Response(200, headers={"content-length": "10240"})
     response = appmod.stream_tee_response(
-        resp, FAKE_KUWO1, None,
+        resp, FAKE_QQ1, None,
         chunks=source(), first_chunk=b"x" * 1024,
         pre_info={"title": "T", "artist": "A"},
     )
@@ -447,9 +446,9 @@ async def test_disconnect_mid_stream_hands_off_part(env, monkeypatch):
     await gen.aclose()  # 切歌：客户端断开
     parts = list(pathlib.Path(env["dirs"]["library"]).rglob("*.part"))
     assert len(parts) == 1
-    assert handed["guid"] == FAKE_KUWO1
+    assert handed["guid"] == FAKE_QQ1
     assert handed["written"] == 1024 and handed["expected"] == 10240
-    assert FAKE_KUWO1 not in appmod._tee_active
+    assert FAKE_QQ1 not in appmod._tee_active
 
 
 def test_env_hot_reload_new_keys(tmp_path, monkeypatch):
@@ -487,11 +486,11 @@ def test_favorite_list_route_never_downloads_missing_files(env, monkeypatch):
     downloads = _no_download_guards(monkeypatch)
     monkeypatch.setattr(appmod, "find_cache_file", lambda guid: None)
     snapshot = appmod.build_favorite_track_obj(
-        FAKE_KUWO1, {"title": "晴天", "artist": "周杰伦", "album": "叶惠美",
-                     "id": "228908", "source": "kuwo"}, created_at=1,
+        FAKE_QQ1, {"title": "晴天", "artist": "周杰伦", "album": "叶惠美",
+                     "id": "228908", "source": "qqmusic"}, created_at=1,
     )
     appmod.save_online_favorites("user-a", [{
-        "guid": FAKE_KUWO1, "createdAt": 1, "bind": "pending", "track": snapshot,
+        "guid": FAKE_QQ1, "createdAt": 1, "bind": "pending", "track": snapshot,
     }])
 
     with TestClient(app) as client:
@@ -499,10 +498,10 @@ def test_favorite_list_route_never_downloads_missing_files(env, monkeypatch):
             resp = client.get("/music/api/v1/favorite-track/list", cookies={"music-token": "t"})
             assert resp.status_code == 200
             # 在线条目仍正常合入列表（列表渲染不受自愈节流影响）
-            assert any(it.get("guid") == appmod.fake_official_guid(FAKE_KUWO1)
+            assert any(it.get("guid") == appmod.fake_official_guid(FAKE_QQ1)
                        for it in resp.json()["data"]["list"])
             # 意图被（重新）登记（重启恢复场景），但从未派发下载
-            assert FAKE_KUWO1 in appmod._bind_pending
+            assert FAKE_QQ1 in appmod._bind_pending
             assert downloads == []
             appmod._bind_retry_last.clear()  # 跨节流窗口（>60s 后的等效读取）
             # 模拟代理重启：内存意图清空，重启后首次列表读取
@@ -518,11 +517,11 @@ def test_playlist_detail_route_never_downloads_missing_files(env, monkeypatch):
     downloads = _no_download_guards(monkeypatch)
     monkeypatch.setattr(appmod, "find_cache_file", lambda guid: None)
     snapshot = appmod.build_favorite_track_obj(
-        FAKE_KUWO1, {"title": "晴天", "artist": "周杰伦", "album": "叶惠美",
-                     "id": "228908", "source": "kuwo"}, created_at=1,
+        FAKE_QQ1, {"title": "晴天", "artist": "周杰伦", "album": "叶惠美",
+                     "id": "228908", "source": "qqmusic"}, created_at=1,
     )
     appmod.save_playlist_tracks("user-a", {
-        PL_CUSTOM: [{"guid": FAKE_KUWO1, "addedAt": 1, "bind": "pending", "track": snapshot}],
+        PL_CUSTOM: [{"guid": FAKE_QQ1, "addedAt": 1, "bind": "pending", "track": snapshot}],
     })
 
     with TestClient(app) as client:
@@ -533,7 +532,7 @@ def test_playlist_detail_route_never_downloads_missing_files(env, monkeypatch):
                 cookies={"music-token": "t"},
             )
             assert resp.status_code == 200
-            assert any(it.get("guid") == appmod.fake_official_guid(FAKE_KUWO1)
+            assert any(it.get("guid") == appmod.fake_official_guid(FAKE_QQ1)
                        for it in resp.json()["data"]["list"])
             appmod._bind_retry_last.clear()
             appmod._bind_pending.clear()
@@ -550,21 +549,21 @@ def test_playlist_detail_route_retries_bind_only_for_existing_files(env, monkeyp
     existing = env["dirs"]["library"] + "/f.mp3"
 
     def fake_find(guid):
-        return existing if guid == FAKE_KUWO1 else None
+        return existing if guid == FAKE_QQ1 else None
 
     monkeypatch.setattr(appmod, "find_cache_file", fake_find)
     snapshot = appmod.build_favorite_track_obj(
-        FAKE_KUWO1, {"title": "晴天", "artist": "周杰伦", "album": "叶惠美",
-                     "id": "228908", "source": "kuwo"}, created_at=1,
+        FAKE_QQ1, {"title": "晴天", "artist": "周杰伦", "album": "叶惠美",
+                     "id": "228908", "source": "qqmusic"}, created_at=1,
     )
     missing = appmod.build_favorite_track_obj(
-        "online:kuwo:999999", {"title": "missing", "artist": "none",
-                               "id": "999999", "source": "kuwo"}, created_at=1,
+        "online:qqmusic:999999", {"title": "missing", "artist": "none",
+                                  "id": "999999", "source": "qqmusic"}, created_at=1,
     )
     appmod.save_playlist_tracks("user-a", {
         PL_CUSTOM: [
-            {"guid": FAKE_KUWO1, "addedAt": 1, "bind": "pending", "track": snapshot},
-            {"guid": "online:kuwo:999999", "addedAt": 2, "bind": "pending", "track": missing},
+            {"guid": FAKE_QQ1, "addedAt": 1, "bind": "pending", "track": snapshot},
+            {"guid": "online:qqmusic:999999", "addedAt": 2, "bind": "pending", "track": missing},
         ],
     })
 
@@ -582,7 +581,7 @@ def test_playlist_detail_route_retries_bind_only_for_existing_files(env, monkeyp
     assert adds and adds[0]["json"]["trackGUIDs"] == [OFFICIAL_GUID]
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_bound_online_favorite_uses_current_official_state_per_user(env):
     make_official_db(env["db_path"])
     with sqlite3.connect(env["db_path"]) as con:
@@ -590,15 +589,15 @@ async def test_bound_online_favorite_uses_current_official_state_per_user(env):
         con.execute("INSERT INTO user VALUES (2, 'user-b')")
         con.execute("INSERT INTO favorite_track VALUES (1, 10, 1)")
     appmod._bind_registry.update({
-        "user-a": {FAKE_KUWO1: {"official": OFFICIAL_GUID, "fav": True}},
-        "user-b": {FAKE_KUWO1: {"official": OFFICIAL_GUID, "fav": True}},
+        "user-a": {FAKE_QQ1: {"official": OFFICIAL_GUID, "fav": True}},
+        "user-b": {FAKE_QQ1: {"official": OFFICIAL_GUID, "fav": True}},
     })
-    assert FAKE_KUWO1 in await appmod._online_favorite_set_for_user("user-a")
-    assert FAKE_KUWO1 not in await appmod._online_favorite_set_for_user("user-b")
+    assert FAKE_QQ1 in await appmod._online_favorite_set_for_user("user-a")
+    assert FAKE_QQ1 not in await appmod._online_favorite_set_for_user("user-b")
     # The binding registry is historical; cancellation through official UI wins.
     with sqlite3.connect(env["db_path"]) as con:
         con.execute("DELETE FROM favorite_track")
-    assert FAKE_KUWO1 not in await appmod._online_favorite_set_for_user("user-a")
+    assert FAKE_QQ1 not in await appmod._online_favorite_set_for_user("user-a")
 
 
 def test_play_history_keeps_heart_after_online_favorite_is_bound(env):
@@ -610,9 +609,9 @@ def test_play_history_keeps_heart_after_online_favorite_is_bound(env):
         con.execute("INSERT INTO user VALUES (1, 'user-a')")
         con.execute("INSERT INTO favorite_track VALUES (1, 10, 1)")
     appmod._bind_registry.update({
-        "user-a": {FAKE_KUWO1: {"official": OFFICIAL_GUID, "fav": True}},
+        "user-a": {FAKE_QQ1: {"official": OFFICIAL_GUID, "fav": True}},
     })
-    dailyrec.record_online_play("user-a", FAKE_KUWO1, {"title": "晴天", "artist": "周杰伦"})
+    dailyrec.record_online_play("user-a", FAKE_QQ1, {"title": "晴天", "artist": "周杰伦"})
 
     with TestClient(app) as client:
         resp = client.get("/music/api/v1/play-history/list")

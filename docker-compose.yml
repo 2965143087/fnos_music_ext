@@ -1,5 +1,5 @@
 # fnmusic-ext v2.0.0：三音源 + WebUI 合并为单容器 fnmusic-sources（supervisor 按需加载）。
-# 音源三选一：FNMUSIC_MUSICDL_ENABLED / FNMUSIC_NETEASE_ENABLED / FNMUSIC_LX_ENABLED
+# 音源三选一：FNMUSIC_NETEASE_ENABLED / FNMUSIC_QQMUSIC_ENABLED / FNMUSIC_LX_ENABLED
 # 只写一个 true；entrypoint.sh 按 /repo/.env 只启动所选音源进程，未启用的不驻留内存。
 # 运行期切源在 WebUI（8774）内完成：写 .env + 同容器 supervisorctl stop/start，秒级生效。
 #

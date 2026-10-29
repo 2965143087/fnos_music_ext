@@ -41,7 +41,7 @@ def setup_lx_env(tmp_path, monkeypatch):
     monkeypatch.setitem(CONF, "netease_search_limit", 50)
     monkeypatch.setitem(CONF, "merge_suggest", False)
     monkeypatch.setitem(CONF, "lyric_field", "data.lyric")
-    monkeypatch.setitem(CONF, "musicdl_enabled", False)
+    monkeypatch.setitem(CONF, "qqmusic_enabled", False)
     monkeypatch.setitem(CONF, "netease_enabled", False)
     monkeypatch.setitem(CONF, "lx_enabled", True)
     monkeypatch.setitem(CONF, "lx_search_limit", 20)
@@ -54,7 +54,7 @@ def setup_lx_env(tmp_path, monkeypatch):
     monkeypatch.setitem(CONF, "search_deep_max_pages", 10)
     yield
     # 恢复全局 app.state，避免 mock 客户端泄漏到其它测试文件
-    for attr in ("upstream_client", "musicdl_client", "musicbox_client", "lx_client"):
+    for attr in ("upstream_client", "qqmusic_client", "musicbox_client", "lx_client"):
         setattr(app.state, attr, None)
 
 
@@ -535,8 +535,8 @@ def test_search_merge_lx_items():
     app.state.upstream_client = httpx.AsyncClient(
         transport=httpx.MockTransport(upstream_handler), base_url="http://unix"
     )
-    app.state.musicdl_client = httpx.AsyncClient(
-        transport=httpx.MockTransport(fail_handler), base_url="http://127.0.0.1:8768"
+    app.state.qqmusic_client = httpx.AsyncClient(
+        transport=httpx.MockTransport(fail_handler), base_url="http://127.0.0.1:8775"
     )
     app.state.musicbox_client = httpx.AsyncClient(
         transport=httpx.MockTransport(fail_handler), base_url="http://127.0.0.1:8770"
@@ -665,9 +665,9 @@ def test_lyric_list_from_lxmusic():
         assert track["audioSpec"]["format"] == "flac"
 
 
-def test_search_without_netease_merges_lx_and_musicdl(monkeypatch):
-    """无 NetEase 时前台 wait/gather 必须正确合并 musicdl + lx（回归 gather 解包 bug）。"""
-    monkeypatch.setitem(CONF, "musicdl_enabled", True)
+def test_search_without_netease_merges_lx_and_qqmusic(monkeypatch):
+    """无 NetEase 时前台 wait/gather 必须正确合并 qqmusic + lx（回归 gather 解包 bug）。"""
+    monkeypatch.setitem(CONF, "qqmusic_enabled", True)
     monkeypatch.setitem(CONF, "netease_enabled", False)
     monkeypatch.setitem(CONF, "lx_enabled", True)
     monkeypatch.setitem(CONF, "netease_wait_s", 0.5)
@@ -681,16 +681,19 @@ def test_search_without_netease_merges_lx_and_musicdl(monkeypatch):
             )
         return httpx.Response(200, json={"code": 0, "data": None})
 
-    def mdl_handler(request: httpx.Request) -> httpx.Response:
-        if request.url.path == "/search":
+    def qq_handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/v1/search":
             return httpx.Response(
                 200,
-                json={"items": [{"id": "migu:1", "source": "migu", "title": "晴天", "artist": "周杰伦", "duration_s": 200, "ext": "mp3"}]},
+                json={"ok": True, "data": [
+                    {"song_id": "1", "song_name": "晴天", "artist": "周杰伦",
+                     "duration": 200, "quality": "HQ", "album_pic_url": ""},
+                ]},
             )
         return httpx.Response(200, json={"ok": True})
 
     app.state.upstream_client = httpx.AsyncClient(transport=httpx.MockTransport(upstream_handler), base_url="http://unix")
-    app.state.musicdl_client = httpx.AsyncClient(transport=httpx.MockTransport(mdl_handler), base_url="http://127.0.0.1:8768")
+    app.state.qqmusic_client = httpx.AsyncClient(transport=httpx.MockTransport(qq_handler), base_url="http://127.0.0.1:8775")
     app.state.musicbox_client = httpx.AsyncClient(
         transport=httpx.MockTransport(lambda r: httpx.Response(500)),
         base_url="http://127.0.0.1:8770",
@@ -705,7 +708,7 @@ def test_search_without_netease_merges_lx_and_musicdl(monkeypatch):
         guids = [str(x.get("guid")) for x in (body.get("data") or {}).get("list") or []]
         assert "local-1" in guids
         assert any(resolve_real_guid(g).startswith("online:lx:") for g in guids)
-        assert any("migu" in resolve_real_guid(g) for g in guids)
+        assert any("qqmusic" in resolve_real_guid(g) for g in guids)
 
 
 def test_search_track_deep_pagination_lx_page_passthrough():
@@ -909,7 +912,7 @@ def test_register_online_meta_capacity_eviction(monkeypatch):
     _ONLINE_META.clear()
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_mobile_cancelled_resolve_rejoins_same_cold_lx_task(monkeypatch):
     import asyncio
     import proxy.app as pa
@@ -936,7 +939,7 @@ async def test_mobile_cancelled_resolve_rejoins_same_cold_lx_task(monkeypatch):
     assert not pa._LX_URL_INFLIGHT
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_shared_lx_scopes_quality_fresh_and_bounds_work(monkeypatch):
     import asyncio
     import proxy.app as pa
@@ -961,7 +964,7 @@ async def test_shared_lx_scopes_quality_fresh_and_bounds_work(monkeypatch):
     assert sum(result is None for result in results) == 7
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_lx_source_change_cannot_publish_old_resolution_or_pin(monkeypatch):
     import asyncio
     import proxy.app as pa
@@ -987,7 +990,7 @@ async def test_lx_source_change_cannot_publish_old_resolution_or_pin(monkeypatch
         assert not pa._LX_URL_INFLIGHT
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 @pytest.mark.parametrize("failure,expected_fresh", [(TimeoutError, False), (httpx.ConnectError, True)])
 async def test_lx_stream_retry_only_refreshes_confirmed_link_failure(monkeypatch, failure, expected_fresh):
     import proxy.app as pa
@@ -1018,7 +1021,7 @@ def test_lx_config_epoch_can_be_invalidated_without_running_loop(monkeypatch):
     assert not pa._LX_URL_PIN
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_lx_prefetch_is_bounded_shared_and_shutdown_drained(monkeypatch):
     import asyncio
     import proxy.app as pa

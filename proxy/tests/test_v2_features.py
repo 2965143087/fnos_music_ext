@@ -139,7 +139,7 @@ def test_ordered_stream_alternatives_unknown_bitrate_keep_tail(monkeypatch):
 # ---------------------------------------------------------------- .env 热重载
 
 _HOT_ENV_KEYS = [
-    "musicdl_enabled", "netease_enabled", "lx_enabled", "online_sources", "lx_sources",
+    "netease_enabled", "qqmusic_enabled", "lx_enabled", "online_sources", "lx_sources",
     "quality_mode", "tee_save_enabled", "tee_save_dir", "tee_cache_max", "cache_dir",
     "recommend_hot", "recommend_daily", "cover_enrich", "llm_base_url", "llm_model",
     "search_timeout",
@@ -155,7 +155,7 @@ def conf_guard():
     """
     snapshot = {k: CONF[k] for k in _HOT_ENV_KEYS if k in CONF}
     env_keys = [
-        "FNMUSIC_MUSICDL_ENABLED", "FNMUSIC_NETEASE_ENABLED", "FNMUSIC_LX_ENABLED",
+        "FNMUSIC_NETEASE_ENABLED", "FNMUSIC_QQMUSIC_ENABLED", "FNMUSIC_LX_ENABLED",
         "FNMUSIC_ONLINE_SOURCES", "LX_SOURCES", "FNMUSIC_QUALITY_MODE",
         "FNMUSIC_TEE_SAVE_ENABLED", "FNMUSIC_TEE_SAVE_DIR", "FNMUSIC_TEE_CACHE_MAX",
         "FNMUSIC_CACHE_DIR",
@@ -175,11 +175,11 @@ def conf_guard():
 
 
 def test_env_hot_reload_whitelist_updates_conf_and_environ(tmp_path, conf_guard):
-    CONF["musicdl_enabled"] = True
+    CONF["qqmusic_enabled"] = True
     CONF["lx_enabled"] = False
     env_file = tmp_path / ".env"
     env_file.write_text(
-        "FNMUSIC_MUSICDL_ENABLED=false\n"
+        "FNMUSIC_QQMUSIC_ENABLED=false\n"
         "FNMUSIC_LX_ENABLED=true\n"
         "FNMUSIC_QUALITY_MODE=balanced\n"
         "FNMUSIC_TEE_SAVE_ENABLED=false\n"
@@ -193,7 +193,7 @@ def test_env_hot_reload_whitelist_updates_conf_and_environ(tmp_path, conf_guard)
         encoding="utf-8",
     )
     changed = apply_env_hot_reload(str(env_file))
-    assert "musicdl_enabled" in changed and CONF["musicdl_enabled"] is False
+    assert "qqmusic_enabled" in changed and CONF["qqmusic_enabled"] is False
     assert CONF["lx_enabled"] is True
     assert CONF["quality_mode"] == "balanced"
     assert CONF["tee_save_enabled"] is False
@@ -308,7 +308,6 @@ async def test_daily_disabled_skips_all_tiers(tmp_path, monkeypatch):
     async with httpx.AsyncClient(transport=httpx.MockTransport(mb_handler), base_url="http://127.0.0.1:8770") as mb:
         payload = await dailyrec.get_or_build_daily(
             user_guid="u-daily-off",
-            musicdl_client=None,
             musicbox_client=mb,
             llm_http=None,
             build_track=build_online_track,
@@ -341,7 +340,6 @@ async def test_daily_off_keeps_hot_charts(tmp_path, monkeypatch):
     async with httpx.AsyncClient(transport=httpx.MockTransport(mb_handler), base_url="http://127.0.0.1:8770") as mb:
         payload = await dailyrec.get_or_build_daily(
             user_guid="u-daily-off-hot-on",
-            musicdl_client=None,
             musicbox_client=mb,
             llm_http=None,
             build_track=build_online_track,
@@ -377,7 +375,6 @@ async def test_recommend_hot_disabled_skips_chart_tiers(tmp_path, monkeypatch):
     async with httpx.AsyncClient(transport=httpx.MockTransport(mb_handler), base_url="http://127.0.0.1:8770") as mb:
         payload = await dailyrec.get_or_build_daily(
             user_guid="u-hot-off",
-            musicdl_client=None,
             musicbox_client=mb,
             llm_http=None,
             build_track=build_online_track,
@@ -419,18 +416,17 @@ def _setup_clients(**handlers):
         base_url="http://unix",
     )
     defaults = {
-        "musicdl": lambda r: httpx.Response(404),
         "musicbox": lambda r: httpx.Response(404),
         "lx": lambda r: httpx.Response(404),
     }
     for name, handler in handlers.items():
-        port = {"musicdl": 8768, "musicbox": 8770, "lx": 8772}[name]
+        port = {"musicbox": 8770, "lx": 8772}[name]
         setattr(app.state, f"{name}_client", httpx.AsyncClient(
             transport=httpx.MockTransport(handler), base_url=f"http://127.0.0.1:{port}",
         ))
         defaults.pop(name, None)
     for name, handler in defaults.items():
-        port = {"musicdl": 8768, "musicbox": 8770, "lx": 8772}[name]
+        port = {"musicbox": 8770, "lx": 8772}[name]
         setattr(app.state, f"{name}_client", httpx.AsyncClient(
             transport=httpx.MockTransport(handler), base_url=f"http://127.0.0.1:{port}",
         ))
@@ -472,42 +468,15 @@ def test_cover_kw_text_url_resolved_via_rid(monkeypatch, tmp_path):
     assert cdn_calls["n"] == 1
 
 
-def test_cover_qq_albummid_gtimg_direct_bytes(monkeypatch, tmp_path):
-    monkeypatch.setitem(CONF, "musicdl_enabled", True)
-    monkeypatch.setitem(CONF, "online_sources", "QqMusicClient,KuwoMusicClient,MiguMusicClient")
-    monkeypatch.setitem(CONF, "cache_dir", str(tmp_path / "cache"))
-
-    def musicdl_handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, json={
-            "ok": True,
-            "id": "qq:003x", "source": "qq", "title": "歌", "artist": "手",
-            "cover_url": "", "albummid": "003x9b8s1v8ZxT",
-        })
-
-    def img_handler(request: httpx.Request) -> httpx.Response:
-        assert request.url.host == "y.gtimg.cn"
-        return httpx.Response(200, content=b"\xFF\xD8\xFFqq", headers={"content-type": "image/jpeg"})
-
-    _setup_clients(musicdl=musicdl_handler)
-    monkeypatch.setattr("proxy.app._COVER_FETCH_ASYNC_TRANSPORT", httpx.MockTransport(img_handler))
-    with TestClient(app) as client:
-        resp = client.get("/music/api/v1/static/cover?coverId=online:qq:003x", follow_redirects=False)
-        assert resp.status_code == 200
-        assert resp.headers["content-type"].startswith("image/jpeg")
-        assert resp.content == b"\xFF\xD8\xFFqq"
-
-
 def test_cover_enrich_via_netease_search(monkeypatch, tmp_path):
-    monkeypatch.setitem(CONF, "musicdl_enabled", True)
-    monkeypatch.setitem(CONF, "online_sources", "KugouMusicClient,QqMusicClient,KuwoMusicClient,MiguMusicClient")
+    monkeypatch.setitem(CONF, "lx_enabled", True)
     monkeypatch.setitem(CONF, "cache_dir", str(tmp_path / "cache"))
 
-    def musicdl_handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, json={
-            "ok": True,
-            "id": "kugou:xyz", "source": "kugou", "title": "晴天", "artist": "周杰伦",
-            "cover_url": "",
-        })
+    def lx_handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v1/track/info"
+        return httpx.Response(200, json={"ok": True, "data": {
+            "id": "lx:kg:HASH1", "title": "晴天", "artist": "周杰伦", "cover_url": "",
+        }})
 
     def musicbox_handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/api/v1/search":
@@ -527,26 +496,23 @@ def test_cover_enrich_via_netease_search(monkeypatch, tmp_path):
         assert str(request.url) == "https://p1.music.126.net/cover.jpg"
         return httpx.Response(200, content=b"\xFF\xD8\xFFwy", headers={"content-type": "image/jpeg"})
 
-    _setup_clients(musicdl=musicdl_handler, musicbox=musicbox_handler)
+    _setup_clients(lx=lx_handler, musicbox=musicbox_handler)
     monkeypatch.setattr("proxy.app._COVER_FETCH_ASYNC_TRANSPORT", httpx.MockTransport(img_handler))
     with TestClient(app) as client:
-        resp = client.get("/music/api/v1/static/cover?coverId=online:kugou:xyz", follow_redirects=False)
+        resp = client.get("/music/api/v1/static/cover?coverId=online:lx:kg:HASH1", follow_redirects=False)
         assert resp.status_code == 200
         assert resp.headers["content-type"].startswith("image/jpeg")
         assert resp.content == b"\xFF\xD8\xFFwy"
 
 
 def test_cover_enrich_disabled_falls_to_placeholder(monkeypatch):
-    monkeypatch.setitem(CONF, "musicdl_enabled", True)
+    monkeypatch.setitem(CONF, "lx_enabled", True)
     monkeypatch.setitem(CONF, "cover_enrich", False)
-    monkeypatch.setitem(CONF, "online_sources", "KugouMusicClient,QqMusicClient,KuwoMusicClient,MiguMusicClient")
 
-    def musicdl_handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, json={
-            "ok": True,
-            "id": "kugou:xyz", "source": "kugou", "title": "晴天", "artist": "周杰伦",
-            "cover_url": "",
-        })
+    def lx_handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"ok": True, "data": {
+            "id": "lx:kg:HASH1", "title": "晴天", "artist": "周杰伦", "cover_url": "",
+        }})
 
     box_calls = {"n": 0}
 
@@ -554,9 +520,9 @@ def test_cover_enrich_disabled_falls_to_placeholder(monkeypatch):
         box_calls["n"] += 1
         return httpx.Response(404)
 
-    _setup_clients(musicdl=musicdl_handler, musicbox=musicbox_handler)
+    _setup_clients(lx=lx_handler, musicbox=musicbox_handler)
     with TestClient(app) as client:
-        resp = client.get("/music/api/v1/static/cover?coverId=online:kugou:xyz", follow_redirects=False)
+        resp = client.get("/music/api/v1/static/cover?coverId=online:lx:kg:HASH1", follow_redirects=False)
     assert resp.status_code == 200
     assert resp.headers["content-type"].startswith("image/png")
     assert resp.headers.get("cache-control") == "no-store"
@@ -565,14 +531,14 @@ def test_cover_enrich_disabled_falls_to_placeholder(monkeypatch):
 
 def test_cover_placeholder_never_404_and_deterministic(monkeypatch):
     # monkeypatch 而非裸赋值：裸写 CONF 会泄漏到后续用例（曾让顺序依赖被掩盖）
-    monkeypatch.setitem(CONF, "musicdl_enabled", True)
-    def musicdl_handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, json={
-            "ok": True, "id": "migu:9", "source": "migu", "title": "t", "artist": "a", "cover_url": "",
-        })
+    monkeypatch.setitem(CONF, "lx_enabled", True)
+    def lx_handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"ok": True, "data": {
+            "id": "lx:kg:HASH9", "title": "t", "artist": "a", "cover_url": "",
+        }})
 
-    _setup_clients(musicdl=musicdl_handler)
-    guid = "online:migu:9"
+    _setup_clients(lx=lx_handler)
+    guid = "online:lx:kg:HASH9"
     with TestClient(app) as client:
         r1 = client.get(f"/music/api/v1/static/cover?coverId={guid}", follow_redirects=False)
         r2 = client.get(f"/music/api/v1/static/cover?coverId={guid}", follow_redirects=False)
@@ -596,7 +562,8 @@ def test_cover_placeholder_files_exist_and_cover_pool():
 def test_cover_kw_rid_guid_parsing():
     from proxy.app import _kw_rid_from_guid
     assert _kw_rid_from_guid("online:lx:kw:123456") == "123456"
-    assert _kw_rid_from_guid("online:kuwo:654321") == "654321"
+    # 旧聚合音源的 kuwo guid 已不再支持（只认 lx 平台 guid）
+    assert _kw_rid_from_guid("online:kuwo:654321") == ""
     assert _kw_rid_from_guid("online:lx:kg:HASH") == ""
     assert _kw_rid_from_guid("online:netease:1") == ""
     assert _kw_rid_from_guid("") == ""
@@ -604,10 +571,9 @@ def test_cover_kw_rid_guid_parsing():
 
 @pytest.mark.anyio
 @pytest.mark.parametrize("enabled,expect", [
-    ({"netease_enabled": True, "musicdl_enabled": False, "lx_enabled": False}, ["musicbox"]),
-    ({"netease_enabled": False, "musicdl_enabled": True, "lx_enabled": False}, ["musicdl"]),
-    ({"netease_enabled": False, "musicdl_enabled": False, "lx_enabled": True}, ["lx"]),
-    ({"netease_enabled": False, "musicdl_enabled": False, "lx_enabled": False}, []),
+    ({"netease_enabled": True, "lx_enabled": False}, ["musicbox"]),
+    ({"netease_enabled": False, "lx_enabled": True}, ["lx"]),
+    ({"netease_enabled": False, "lx_enabled": False}, []),
 ])
 async def test_aggregate_search_dispatches_single_provider(monkeypatch, enabled, expect):
     called: list[str] = []
@@ -616,16 +582,12 @@ async def test_aggregate_search_dispatches_single_provider(monkeypatch, enabled,
         called.append("musicbox")
         return {"items": [{"id": "netease:1", "title": "t", "artist": "a"}]}
 
-    async def fake_mdl(*_a, **_k):
-        called.append("musicdl")
-        return {"items": [{"id": "kuwo:1", "title": "t", "artist": "a"}]}
-
     async def fake_lx(*_a, **_k):
         called.append("lx")
         return {"items": [{"id": "lx:kw:1", "title": "t", "artist": "a"}]}
 
     monkeypatch.setattr("proxy.app.fetch_musicbox_search", fake_mb)
-    monkeypatch.setattr("proxy.app.fetch_musicdl_search", fake_mdl)
+    monkeypatch.setattr("proxy.app.fetch_lx_search", fake_lx)
     monkeypatch.setattr("proxy.app.fetch_lx_search", fake_lx)
     for key, value in enabled.items():
         monkeypatch.setitem(CONF, key, value)
@@ -659,8 +621,8 @@ def _write_recommend_bundle(rec_dir: str, user_guid: str, tracks: list, kind: st
     return guid
 
 
-def _cover_env(tmp_path, monkeypatch, user_guid="user-cover", musicdl_handler=None):
-    """封面端点测试环境：upstream 提供登录态，三个音源默认 404（可传 musicdl 覆盖）。
+def _cover_env(tmp_path, monkeypatch, user_guid="user-cover"):
+    """封面端点测试环境：upstream 提供登录态，musicbox / lx 默认 404。
 
     注意不能复用 _setup_clients——它会无条件把 upstream 覆盖成 400，导致鉴权探测失败。
     """
@@ -677,10 +639,6 @@ def _cover_env(tmp_path, monkeypatch, user_guid="user-cover", musicdl_handler=No
     app.state.upstream_client = httpx.AsyncClient(
         transport=httpx.MockTransport(upstream_handler), base_url="http://unix"
     )
-    app.state.musicdl_client = httpx.AsyncClient(
-        transport=httpx.MockTransport(musicdl_handler or (lambda r: httpx.Response(404))),
-        base_url="http://127.0.0.1:8768",
-    )
     app.state.musicbox_client = httpx.AsyncClient(
         transport=httpx.MockTransport(lambda r: httpx.Response(404)), base_url="http://127.0.0.1:8770"
     )
@@ -691,40 +649,43 @@ def _cover_env(tmp_path, monkeypatch, user_guid="user-cover", musicdl_handler=No
 
 
 def test_static_cover_playlist_skips_coverless_tracks(tmp_path, monkeypatch):
-    """歌单封面请求：第一首无封面 → 跳到第二首（musicdl 只收到第二首的 info）。"""
-    # musicdl 封面直链需要音源开启（自给自足，不依赖前置用例的 CONF 泄漏）
-    monkeypatch.setitem(CONF, "musicdl_enabled", True)
+    """歌单封面请求：第一首无封面 → 跳到第二首。"""
+    # 封面直链需要音源开启（自给自足，不依赖前置用例的 CONF 泄漏）
+    monkeypatch.setitem(CONF, "lx_enabled", True)
     monkeypatch.setitem(CONF, "cache_dir", str(tmp_path / "cache"))
-    def musicdl_handler(request: httpx.Request) -> httpx.Response:
-        assert request.url.path == "/info"
-        assert request.url.params.get("id") == "migu:2"
-        return httpx.Response(200, json={"ok": True, "id": "migu:2", "title": "歌", "artist": "手",
-                                          "cover_url": "http://img.music.migu.cn/2.jpg"})
+    def lx_handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"ok": True, "data": {
+            "id": "lx:kg:B", "title": "歌", "artist": "手",
+            "cover_url": "http://img.example.com/2.jpg",
+        }})
 
     def img_handler(request: httpx.Request) -> httpx.Response:
-        assert str(request.url) == "http://img.music.migu.cn/2.jpg"
-        return httpx.Response(200, content=b"\xFF\xD8\xFFmigu2", headers={"content-type": "image/jpeg"})
+        assert str(request.url) == "http://img.example.com/2.jpg"
+        return httpx.Response(200, content=b"\xFF\xD8\xFFcover2", headers={"content-type": "image/jpeg"})
 
-    rec_dir = _cover_env(tmp_path, monkeypatch, musicdl_handler=musicdl_handler)
+    rec_dir = _cover_env(tmp_path, monkeypatch)
+    app.state.lx_client = httpx.AsyncClient(
+        transport=httpx.MockTransport(lx_handler), base_url="http://127.0.0.1:8772"
+    )
     monkeypatch.setattr("proxy.app._COVER_FETCH_ASYNC_TRANSPORT", httpx.MockTransport(img_handler))
     tracks = [
-        {"guid": "online:migu:1", "coverId": "online:migu:1", "cover_url": ""},
-        {"guid": "online:migu:2", "coverId": "online:migu:2", "cover_url": "http://img.music.migu.cn/2.jpg"},
+        {"guid": "online:lx:kg:A", "coverId": "online:lx:kg:A", "cover_url": ""},
+        {"guid": "online:lx:kg:B", "coverId": "online:lx:kg:B", "cover_url": "http://img.example.com/2.jpg"},
     ]
     pl_guid = _write_recommend_bundle(rec_dir, "user-cover", tracks)
     with TestClient(app) as client:
         resp = client.get(f"/music/api/v1/static/cover?coverId={pl_guid}&size=120", follow_redirects=False)
     assert resp.status_code == 200
     assert resp.headers["content-type"].startswith("image/jpeg")
-    assert resp.content == b"\xFF\xD8\xFFmigu2"
+    assert resp.content == b"\xFF\xD8\xFFcover2"
 
 
 def test_static_cover_playlist_without_covers_returns_placeholder(tmp_path, monkeypatch):
     """歌单内全部曲目无封面时返回不可缓存的有效图片。"""
     rec_dir = _cover_env(tmp_path, monkeypatch)
     tracks = [
-        {"guid": "online:migu:1", "coverId": "online:migu:1", "cover_url": ""},
-        {"guid": "online:migu:2", "coverId": "online:migu:2", "cover_url": ""},
+        {"guid": "online:lx:kg:A", "coverId": "online:lx:kg:A", "cover_url": ""},
+        {"guid": "online:lx:kg:B", "coverId": "online:lx:kg:B", "cover_url": ""},
     ]
     pl_guid = _write_recommend_bundle(rec_dir, "user-cover", tracks, kind="hot")
 
@@ -741,26 +702,30 @@ def test_static_cover_disguised_playlist_cover_survives_restart(tmp_path, monkey
 
     from proxy.app import _FAKE_GUID_REVERSE, _REGISTRY_WARMED
 
-    # _online_info 按 CONF 门禁调用 musicdl：本用例走 musicdl 封面直链，
-    # 必须自给自足开启（此前隐式依赖前置用例泄漏的 musicdl_enabled=True，
+    # _online_info 按 CONF 门禁调用 lx：本用例走 lx 封面直链，
+    # 必须自给自足开启（此前隐式依赖前置用例泄漏的开关，
     # 单跑/换文件顺序即挂）
-    monkeypatch.setitem(CONF, "musicdl_enabled", True)
+    monkeypatch.setitem(CONF, "lx_enabled", True)
     monkeypatch.setitem(CONF, "cache_dir", str(tmp_path / "cache"))
 
-    def musicdl_handler(request: httpx.Request) -> httpx.Response:
-        assert request.url.params.get("id") == "migu:2"
-        return httpx.Response(200, json={"ok": True, "id": "migu:2", "title": "歌", "artist": "手",
-                                          "cover_url": "http://img.music.migu.cn/2.jpg"})
+    def lx_handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"ok": True, "data": {
+            "id": "lx:kg:B", "title": "歌", "artist": "手",
+            "cover_url": "http://img.example.com/2.jpg",
+        }})
 
     def img_handler(request: httpx.Request) -> httpx.Response:
-        assert str(request.url) == "http://img.music.migu.cn/2.jpg"
-        return httpx.Response(200, content=b"\xFF\xD8\xFFmigu2", headers={"content-type": "image/jpeg"})
+        assert str(request.url) == "http://img.example.com/2.jpg"
+        return httpx.Response(200, content=b"\xFF\xD8\xFFcover2", headers={"content-type": "image/jpeg"})
 
-    rec_dir = _cover_env(tmp_path, monkeypatch, musicdl_handler=musicdl_handler)
+    rec_dir = _cover_env(tmp_path, monkeypatch)
+    app.state.lx_client = httpx.AsyncClient(
+        transport=httpx.MockTransport(lx_handler), base_url="http://127.0.0.1:8772"
+    )
     monkeypatch.setattr("proxy.app._COVER_FETCH_ASYNC_TRANSPORT", httpx.MockTransport(img_handler))
     tracks = [
-        {"guid": "online:migu:1", "coverId": "online:migu:1", "cover_url": ""},
-        {"guid": "online:migu:2", "coverId": "online:migu:2", "cover_url": "http://img.music.migu.cn/2.jpg"},
+        {"guid": "online:lx:kg:A", "coverId": "online:lx:kg:A", "cover_url": ""},
+        {"guid": "online:lx:kg:B", "coverId": "online:lx:kg:B", "cover_url": "http://img.example.com/2.jpg"},
     ]
     pl_guid = _write_recommend_bundle(rec_dir, "user-cover", tracks)
     fake_cover = "track_" + hashlib.md5(f"fnmusic-ext::{pl_guid}".encode()).hexdigest()
@@ -777,7 +742,7 @@ def test_static_cover_disguised_playlist_cover_survives_restart(tmp_path, monkey
             resp = client.get(f"/music/api/v1/static/cover?coverId={fake_cover}&size=120", follow_redirects=False)
         assert resp.status_code == 200
         assert resp.headers["content-type"].startswith("image/jpeg")
-        assert resp.content == b"\xFF\xD8\xFFmigu2"
+        assert resp.content == b"\xFF\xD8\xFFcover2"
     finally:
         _FAKE_GUID_REVERSE.clear()
         _FAKE_GUID_REVERSE.update(backup)

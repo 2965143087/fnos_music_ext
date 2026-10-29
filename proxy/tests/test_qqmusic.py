@@ -72,8 +72,8 @@ def test_source_enabled_requires_flag(monkeypatch):
     assert _source_enabled(QQ_GUID) is False
 
 
-def test_source_enabled_not_filtered_by_musicdl_platforms(monkeypatch):
-    """online_sources 是 musicdl 平台白名单，不应拦截 QQ 音乐。"""
+def test_source_enabled_not_filtered_by_online_sources(monkeypatch):
+    """online_sources 只约束聚合音源，不应拦截 QQ 音乐。"""
     monkeypatch.setitem(CONF, "online_sources", "KuwoMusicClient")
     assert _source_enabled(QQ_GUID) is True
 

@@ -1,4 +1,4 @@
-"""搜索结果在线来源标记：netease→[music box]、musicdl→[dl]、lx→逐曲 [脚本名-平台]
+"""搜索结果在线来源标记：netease→[music box]、qqmusic→[QQ]、lx→逐曲 [脚本名-平台]
 （如 [墨澜-kg]；脚本无法归属落 lx，平台未知回退激活源备注名或 [lx]）。
 
 标记仅改下发显示的 title/name（搜索结果列表），本地条目与收藏/历史/元数据等
@@ -46,7 +46,7 @@ def setup_test_env(tmp_path, monkeypatch):
     monkeypatch.setitem(CONF, "netease_search_limit", 50)
     monkeypatch.setitem(CONF, "lx_search_limit", 50)
     monkeypatch.setitem(CONF, "lx_sources", [])
-    monkeypatch.setitem(CONF, "musicdl_enabled", True)
+    monkeypatch.setitem(CONF, "qqmusic_enabled", True)
     monkeypatch.setitem(CONF, "netease_enabled", False)
     monkeypatch.setitem(CONF, "lx_enabled", False)
     monkeypatch.setitem(CONF, "netease_wait_s", 3.0)
@@ -85,8 +85,10 @@ def test_source_display_prefix_mapping(monkeypatch):
     ])
     assert source_display_prefix("netease") == "[music box] "
     assert source_display_prefix("lx") == "[星海源] "
-    assert source_display_prefix("kuwo") == "[dl] "
-    assert source_display_prefix("migu") == "[dl] "
+    assert source_display_prefix("qqmusic") == "[QQ] "
+    # 已下线的聚合音源不再有专属标记
+    assert source_display_prefix("kuwo") == ""
+    assert source_display_prefix("migu") == ""
     assert source_display_prefix("") == ""
     # 激活源在列表里但未备注 → [lx]
     monkeypatch.setitem(CONF, "lx_source_url", "http://s2/two.js")
@@ -364,7 +366,7 @@ def test_cold_cache_refreshes_at_low_monotonic_uptime(monkeypatch):
 def test_strip_source_tag_precise(monkeypatch):
     _set_lx_source(monkeypatch, "http://s1/one.js", [{"name": "星海源", "url": "http://s1/one.js"}])
     assert strip_source_tag("[music box] 晴天") == "晴天"
-    assert strip_source_tag("[dl] 晴天") == "晴天"
+    assert strip_source_tag("[QQ] 晴天") == "晴天"
     assert strip_source_tag("[lx] 晴天") == "晴天"
     # [脚本名-平台] 全部变体可剥离（列表备注名与兜底 lx × 全部平台码）
     assert strip_source_tag("[lx-kg] 晴天") == "晴天"
@@ -400,12 +402,12 @@ def test_build_online_track_mark_source_only_title():
 
     # 空标题不加标记
     empty = build_online_track(
-        {"id": "migu:1", "source": "migu", "title": "", "artist": "x"}, mark_source=True
+        {"id": "qqmusic:1", "source": "qqmusic", "title": "", "artist": "x"}, mark_source=True
     )
     assert empty["title"] == ""
 
 
-def test_search_merge_marks_online_not_local():
+def test_search_merge_marks_online_not_local(monkeypatch):
     def upstream_handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json={
             "code": 0,
@@ -422,36 +424,36 @@ def test_search_merge_marks_online_not_local():
             },
         })
 
-    def musicdl_handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, json={"ok": True, "items": [{
-            "id": "migu:600902",
-            "source": "migu",
-            "title": "晴天",
+    def qqmusic_handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"ok": True, "data": [{
+            "song_id": "600902",
+            "song_name": "晴天",
             "artist": "周杰伦",
-            "album": "叶惠美",
-            "duration_s": 269,
-            "ext": "mp3",
-            "file_size": 4096000,
+            "album_name": "叶惠美",
+            "duration": 269,
+            "quality": "HQ",
+            "album_pic_url": "",
         }]})
 
     app.state.upstream_client = httpx.AsyncClient(
         transport=httpx.MockTransport(upstream_handler), base_url="http://unix"
     )
-    app.state.musicdl_client = httpx.AsyncClient(
-        transport=httpx.MockTransport(musicdl_handler), base_url="http://127.0.0.1:8768"
+    app.state.qqmusic_client = httpx.AsyncClient(
+        transport=httpx.MockTransport(qqmusic_handler), base_url="http://127.0.0.1:8775"
     )
+    monkeypatch.setitem(CONF, "qqmusic_enabled", True)
     with TestClient(app) as client:
         resp = client.get("/music/api/v1/search/track?keyword=晴天")
         lst = resp.json()["data"]["list"]
     titles = [it["title"] for it in lst]
     assert titles[0] == "夜曲"
-    assert "[dl] 晴天" in titles
+    assert "[QQ] 晴天" in titles
     # 同名本地条目存在时在线去重（按干净标题），不会出现带标记的重复
     assert titles.count("晴天") == 0
 
 
 def test_search_merge_lx_script_platform_and_fallback(monkeypatch):
-    monkeypatch.setitem(CONF, "musicdl_enabled", False)
+    monkeypatch.setitem(CONF, "qqmusic_enabled", False)
     monkeypatch.setitem(CONF, "lx_enabled", True)
     _set_lx_source(monkeypatch, "", [
         {"name": "星海源", "url": "http://s1/one.js", "active": True},
@@ -553,7 +555,7 @@ def test_event_report_strips_source_tag(tmp_path, monkeypatch, refresh_after_dis
     with TestClient(app) as client:
         resp = client.post("/music/api/v1/event/report", json={"events": [
             {"eventType": "track_play", "occurredAt": 1,
-             "payload": {"trackGUID": "online:migu:1", "title": "[dl] 晴天", "artist": "周杰伦"}},
+             "payload": {"trackGUID": "online:qqmusic:1", "title": "[QQ] 晴天", "artist": "周杰伦"}},
             {"eventType": "track_play", "occurredAt": 2,
              "payload": {"trackGUID": "online:lx:kg:9", "title": "[星海源] 夜曲", "artist": "周杰伦"}},
             {"eventType": "track_play", "occurredAt": 3,
@@ -573,7 +575,7 @@ def test_event_report_strips_source_tag(tmp_path, monkeypatch, refresh_after_dis
 
     items = dailyrec.load_online_play_history("user-tag-1")
     by_guid = {it["guid"]: it for it in items}
-    assert by_guid["online:migu:1"]["track"]["title"] == "晴天"
+    assert by_guid["online:qqmusic:1"]["track"]["title"] == "晴天"
     assert by_guid["online:lx:kg:9"]["track"]["title"] == "夜曲"
     assert by_guid["online:netease:5"]["track"]["title"] == "七里香"
     assert by_guid["online:lx:kw:3"]["track"]["title"] == "搁浅"
@@ -616,12 +618,13 @@ def test_slow_descriptor_preserves_aggregate_and_refreshes_cached_labels(monkeyp
                     "code": 0, "data": {"list": [], "total": 0},
                 })), base_url="http://unix") as upstream, \
                 httpx.AsyncClient(transport=httpx.MockTransport(lambda r: httpx.Response(200, json={
-                    "ok": True, "items": [{"id": "migu:1", "source": "migu", "title": "夜曲", "artist": "周杰伦"}],
-                })), base_url="http://dl") as dl, \
+                    "ok": True, "data": [{"song_id": "1", "song_name": "夜曲", "artist": "周杰伦",
+                                          "duration": 269, "quality": "HQ"}],
+                })), base_url="http://qq") as qq, \
                 httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://proxy") as api:
             monkeypatch.setattr(app.state, "lx_client", lx, raising=False)
             monkeypatch.setattr(app.state, "upstream_client", upstream, raising=False)
-            monkeypatch.setattr(app.state, "musicdl_client", dl, raising=False)
+            monkeypatch.setattr(app.state, "qqmusic_client", qq, raising=False)
             async with pa.lifespan(app):
                 response = await asyncio.wait_for(api.get("/music/api/v1/search/track?keyword=晴天"), 1)
                 await asyncio.wait_for(entered.wait(), 1)
@@ -630,7 +633,7 @@ def test_slow_descriptor_preserves_aggregate_and_refreshes_cached_labels(monkeyp
                 assert not release.is_set()
                 entry = next(iter(_SEARCH_CACHE.values()))
                 await asyncio.wait_for(entry["task"], 1)
-                assert {item["source"] for item in entry["items"]} == {"lx", "migu"}
+                assert {item["source"] for item in entry["items"]} == {"lx", "qqmusic"}
                 assert entry["partial"] is False
                 assert not entry.get("abandoned")
                 assert all("lx_script" not in item for item in entry["items"])
@@ -655,7 +658,7 @@ def test_slow_descriptor_preserves_aggregate_and_refreshes_cached_labels(monkeyp
                 count = len(search_calls)
                 response = await api.get("/music/api/v1/search/track?keyword=晴天")
                 titles = [item["title"] for item in response.json()["data"]["list"]]
-                assert set(titles) == {"[实际脚本-kg] 晴天", "[dl] 夜曲"}
+                assert set(titles) == {"[实际脚本-kg] 晴天", "[QQ] 夜曲"}
                 assert len(search_calls) == count
                 assert all("lx_script" not in item for item in entry["items"])
                 pa._schedule_lx_script_map_refresh(lx)

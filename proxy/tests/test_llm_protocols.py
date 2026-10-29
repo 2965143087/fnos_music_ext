@@ -363,12 +363,9 @@ async def test_daily_build_records_llm_failure_and_keeps_local(monkeypatch):
         lambda r: httpx.Response(200, json=_chat_body("", finish="length", usage=usage)))
     async with httpx.AsyncClient(transport=transport) as llm_client, \
             httpx.AsyncClient(transport=httpx.MockTransport(lambda r: httpx.Response(404)),
-                              base_url="http://127.0.0.1:8768") as mdl, \
-            httpx.AsyncClient(transport=httpx.MockTransport(lambda r: httpx.Response(404)),
                               base_url="http://127.0.0.1:8770") as mb:
         payload = await dailyrec.get_or_build_daily(
             user_guid="u-issue83",
-            musicdl_client=mdl,
             musicbox_client=mb,
             llm_http=llm_client,
             build_track=build_online_track,
@@ -396,12 +393,9 @@ async def test_daily_build_records_token_limit_failure(monkeypatch):
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as llm_client, \
             httpx.AsyncClient(transport=httpx.MockTransport(lambda r: httpx.Response(404)),
-                              base_url="http://127.0.0.1:8768") as mdl, \
-            httpx.AsyncClient(transport=httpx.MockTransport(lambda r: httpx.Response(404)),
                               base_url="http://127.0.0.1:8770") as mb:
         payload = await dailyrec.get_or_build_daily(
             user_guid="u-token-limit",
-            musicdl_client=mdl,
             musicbox_client=mb,
             llm_http=llm_client,
             build_track=build_online_track,

@@ -33,7 +33,7 @@ _TZ = timezone(timedelta(hours=8))
 # 图标/说明直接指向本仓库 main 分支的 raw 地址，随仓库内容自然更新
 _ICON_URL = f"https://raw.githubusercontent.com/{DEFAULT_REPO}/main/packaging/fpk/ICON_256.PNG"
 _README_URL = f"https://raw.githubusercontent.com/{DEFAULT_REPO}/main/README.md"
-_DESC = ("飞牛音乐第三方音源扩展：零侵入接管官方音乐入口，提供 musicdl 聚合、网易云、"
+_DESC = ("飞牛音乐第三方音源扩展：零侵入接管官方音乐入口，提供 聚合音源 聚合、网易云、"
          "洛雪自定义源在线搜索播放、热门/每日推荐、边听边存与收藏自动下载，内置管理页。")
 _LABELS = "影音娱乐"
 _LICENSE = "MIT"

@@ -66,8 +66,7 @@ def test_container_ensure_then_start_stops_at_failed_stage(tmp_path, failure):
 set -euo pipefail
 BASE_DIR="/test repo"
 CONTAINER_NAME=fnmusic-sources
-ENABLE_MUSICBOX=0
-ENABLE_MUSICDL=1
+ENABLE_MUSICBOX=1
 ENABLE_QQMUSIC=0
 ENABLE_LX=0
 WEBUI_FLAG=false
@@ -100,7 +99,7 @@ run_docker() {
                                   "CALLS": str(calls), "FNMUSIC_DURABLE_LOG": str(durable)})
     expected = ['ensure-image']
     if not failure:
-        expected.append('wait http://127.0.0.1:8768/healthz 90 2')
+        expected.append('wait http://127.0.0.1:8770/healthz 60 2')
     assert calls.read_text().splitlines() == expected
     assert result.returncode == (1 if failure else 0), result.stderr
     if failure:
@@ -248,7 +247,7 @@ def test_lx_cli_local_paths_preserve_internal_spaces(tmp_path):
     script.write_text("/** @name Example */")
     text = (BASE / "install.sh").read_text()
     start = text.index('if [ "${ENABLE_LX}" -eq 1 ]; then', text.index("# 洛雪自定义源："))
-    end = text.index("\nMDL_SUMMARY=", start)
+    end = text.index('\nLX_SUMMARY=""', start)
     block = text[start:end]
     body = '''set -euo pipefail
 ENABLE_LX=1
@@ -295,15 +294,13 @@ VERIFY_STUBS = """
 log_info() { printf 'info %s\\n' "$*"; }
 log_warn() { printf 'warn %s\\n' "$*"; }
 log_err() { printf 'err %s\\n' "$*" >&2; }
-warn_unregistered_mdl_platforms() { :; }
 get_fnos_gateway_ports() { printf '5666 5667\\n'; }
 TARGET_SOCK=/tmp/verify.sock
-MUSICDL_URL=http://mdl.test
 MUSICBOX_URL=http://mb.test
 LX_URL=http://lx.test
+QQMUSIC_URL=http://qq.test
 FNMUSIC_ONLINE_SOURCES=
 LX_SOURCES=
-ENABLE_MUSICDL=0
 ENABLE_MUSICBOX=0
 ENABLE_QQMUSIC=0
 ENABLE_LX=0
@@ -345,9 +342,6 @@ case "${{url:-}}" in
   $MUSICBOX_URL/api/v1/search*)
     printf '%s' "${{SEARCH_MB_JSON:-}}"
     ;;
-  $MUSICDL_URL/search?keyword=*)
-    printf '%s' "${{SEARCH_MDL_JSON:-}}"
-    ;;
   *)
     printf '200 0.5'
     ;;
@@ -361,7 +355,7 @@ def acceptance_bindir(tmp_path: Path, **env: str) -> tuple[Path, dict]:
     link_tools(bindir, ("python3", "mktemp", "wc", "awk", "tr", "head", "grep", "cat", "rm"))
     write_stub(bindir, "curl", curl_stub_body(bindir))
     # URL 变量必须进环境：curl 桩是独立进程，靠 env 里的 URL 做 case 匹配
-    defaults = {"LX_URL": "http://lx.test", "MUSICDL_URL": "http://mdl.test",
+    defaults = {"LX_URL": "http://lx.test",
                 "MUSICBOX_URL": "http://mb.test", "QQMUSIC_URL": "http://qq.test",
                 "ENABLE_QQMUSIC": "0"}
     defaults.update(env)
@@ -380,8 +374,8 @@ def acceptance_script(tmp_path: Path, flags: str, **env: str) -> subprocess.Comp
 def test_acceptance_401_fast_path_then_empty_search_warns_not_fails(tmp_path):
     # 6a 401 秒回 + 所有源搜索为空 → 只告警不阻断（外部网络波动不回滚）
     result = acceptance_script(
-        tmp_path, "ENABLE_MUSICDL=1",
-        SEARCH_MDL_JSON=json.dumps({"items": []}))
+        tmp_path, "ENABLE_MUSICBOX=1",
+        SEARCH_MB_JSON=json.dumps({"data": []}))
     assert result.returncode == 0, result.stderr
     assert "验收 6a 通过" in result.stdout
     assert "搜索结果均为空" in result.stdout
@@ -389,20 +383,20 @@ def test_acceptance_401_fast_path_then_empty_search_warns_not_fails(tmp_path):
     assert "err " not in result.stderr
 
 
-def test_acceptance_musicdl_search_success(tmp_path):
+def test_acceptance_musicbox_search_success(tmp_path):
     result = acceptance_script(
-        tmp_path, "ENABLE_MUSICDL=1",
-        SEARCH_MDL_JSON=json.dumps({"items": [{"id": "mdl-1"}]}),
+        tmp_path, "ENABLE_MUSICBOX=1",
+        SEARCH_MB_JSON=json.dumps({"data": [{"song_id": "1"}]}),
         STREAM_CODE="206", STREAM_BYTES="20000")
     assert result.returncode == 0, result.stderr
-    assert "验收 6b 通过：音源 musicdl" in result.stdout
+    assert "验收 6b 通过：音源 musicbox" in result.stdout
 
 
 def test_acceptance_search_never_probes_stream_size(tmp_path):
     # 安装只验搜索；即使媒体不可用，也不自动取流触发下载。
     result = acceptance_script(
-        tmp_path, "ENABLE_MUSICDL=1",
-        SEARCH_MDL_JSON=json.dumps({"items": [{"id": "mdl-1"}]}),
+        tmp_path, "ENABLE_MUSICBOX=1",
+        SEARCH_MB_JSON=json.dumps({"data": [{"song_id": "1"}]}),
         STREAM_CODE="206", STREAM_BYTES="100")
     assert result.returncode == 0, result.stderr
     assert "验收 6b 通过" in result.stdout
@@ -411,21 +405,21 @@ def test_acceptance_search_never_probes_stream_size(tmp_path):
 
 
 def test_acceptance_401_wrong_status_fails(tmp_path):
-    result = acceptance_script(tmp_path, "ENABLE_MUSICDL=1", CURL_401_CODE="200",
+    result = acceptance_script(tmp_path, "ENABLE_MUSICBOX=1", CURL_401_CODE="200",
                                CURL_401_BODY='{"code":0}')
     assert result.returncode == 1
     assert "验收 6a 失败" in result.stderr
 
 
 def test_acceptance_401_too_slow_fails(tmp_path):
-    result = acceptance_script(tmp_path, "ENABLE_MUSICDL=1", CURL_401_TIME="4.2")
+    result = acceptance_script(tmp_path, "ENABLE_MUSICBOX=1", CURL_401_TIME="4.2")
     assert result.returncode == 1
     assert "耗时过长" in result.stderr
 
 
 def test_acceptance_socket_probe_falls_back_to_gateway(tmp_path):
     # socket 探测 000 → 回退网关 https 仍拿 401 → 6a 通过
-    result = acceptance_script(tmp_path, "ENABLE_MUSICDL=1", CURL_401_UNIX_000="1")
+    result = acceptance_script(tmp_path, "ENABLE_MUSICBOX=1", CURL_401_UNIX_000="1")
     assert result.returncode == 0, result.stderr
     assert "验收 6a 通过" in result.stdout
 
@@ -433,7 +427,7 @@ def test_acceptance_socket_probe_falls_back_to_gateway(tmp_path):
 def test_acceptance_lx_search_does_not_resolve_or_stream(tmp_path):
     # 搜索可用即完成安装验收，不解析直链或经代理取流。
     result = acceptance_script(
-        tmp_path, "ENABLE_MUSICDL=0 ENABLE_LX=1",
+        tmp_path, "ENABLE_LX=1",
         SEARCH_LX_JSON=json.dumps({"items": [{"id": "lx:kg:abc"}]}),
         STREAM_CODE="404", STREAM_BYTES="0")
     assert result.returncode == 0, result.stderr

@@ -89,7 +89,7 @@ EXISTING = [
 DESIRED = [
     ("FNMUSIC_HOME", "/default/home"),
     ("FNMUSIC_CACHE_DIR", "/default/home/cache"),
-    ("FNMUSIC_MUSICDL_ENABLED", "true"),
+    ("FNMUSIC_QQMUSIC_ENABLED", "true"),
     ("FNMUSIC_NETEASE_ENABLED", "false"),
     ("FNMUSIC_ONLINE_SOURCES", "MiguMusicClient,KuwoMusicClient"),
     ("FNMUSIC_LLM_BASE_URL", ""),

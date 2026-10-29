@@ -28,7 +28,7 @@ def test_hours_getter_has_no_artificial_maximum(monkeypatch, raw, expected):
     assert rec.llm_liked_refresh_hours() == expected
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 @pytest.mark.parametrize("complete", [False, True])
 async def test_zero_size_only_hides_enabled_llm_not_local_fallback(monkeypatch, complete):
     from proxy import app as pa
@@ -62,7 +62,7 @@ def test_large_liked_interval_applies_on_hot_reload(tmp_path, monkeypatch):
     assert pa.CONF["liked_refresh_hours"] == rec.llm_liked_refresh_hours() == 10000
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_daily_total_switch_prevents_llm_call(tmp_path, monkeypatch):
     monkeypatch.setenv("FNMUSIC_RECOMMEND_DIR", str(tmp_path))
     monkeypatch.setenv("FNMUSIC_LLM_DAILY_ENABLED", "true")
@@ -72,7 +72,7 @@ async def test_daily_total_switch_prevents_llm_call(tmp_path, monkeypatch):
         pytest.fail("daily master switch must gate the model")
     monkeypatch.setattr(rec, "call_llm", forbidden)
     result = await rec.get_or_build_daily(
-        user_guid="test-user", musicdl_client=None, musicbox_client=None,
+        user_guid="test-user", musicbox_client=None,
         llm_http=object(), build_track=lambda track: track,
         netease_enabled=False, recommend_daily=False, kind="daily",
     )

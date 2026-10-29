@@ -9,7 +9,7 @@ const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => Array.from(document.querySelectorAll(sel));
 
 const PROVIDER_LABEL = { musicbox: "网易云音乐盒子", qqmusic: "QQ 音乐", lxmusic: "洛雪自定义源", none: "未配置" };
-const PROC_LABEL = { musicdl: "musicdl", musicbox: "musicbox", qqmusic: "qqmusic", lxserver: "lxserver", lxmusic: "lxmusic", webui: "WebUI" };
+const PROC_LABEL = { musicbox: "musicbox", qqmusic: "qqmusic", lxserver: "lxserver", lxmusic: "lxmusic", webui: "WebUI" };
 
 let configValues = {};   // GET /api/config 的 values
 let configPresence = {}; // .env 显式存在的键（区分默认空与管理员清空）
@@ -322,6 +322,7 @@ function applyConfigToForm() {
   $("#search-deep").checked = v.FNMUSIC_SEARCH_DEEP_PAGE !== "false";
   $("#search-deep-max").value = v.FNMUSIC_SEARCH_DEEP_MAX_PAGES || "10";
   $("#netease-my-playlists").checked = v.FNMUSIC_NETEASE_MY_PLAYLISTS === "true";
+  if ($("#qqmusic-playlists")) $("#qqmusic-playlists").checked = v.FNMUSIC_QQMUSIC_PLAYLISTS_ENABLED === "true";
   $("#netease-playlist-resident").checked = v.FNMUSIC_NETEASE_PLAYLIST_RESIDENT === "true";
   $("#lx-url").value = "";
   lxVerifiedUrl = null;
@@ -349,7 +350,6 @@ function applyConfigToForm() {
 function collectConfig() {
   const provider = ($$("input[name=provider]").find((el) => el.checked) || {}).value || "";
   const values = {
-    FNMUSIC_MUSICDL_ENABLED: provider === "musicdl",
     FNMUSIC_NETEASE_ENABLED: provider === "musicbox",
     FNMUSIC_QQMUSIC_ENABLED: provider === "qqmusic",
     FNMUSIC_LX_ENABLED: provider === "lxmusic",
@@ -381,6 +381,7 @@ function collectConfig() {
     FNMUSIC_SEARCH_DEEP_PAGE: $("#search-deep").checked,
     FNMUSIC_SEARCH_DEEP_MAX_PAGES: parseInt($("#search-deep-max").value || "10", 10) || 10,
     FNMUSIC_NETEASE_MY_PLAYLISTS: $("#netease-my-playlists").checked,
+    FNMUSIC_QQMUSIC_PLAYLISTS_ENABLED: $("#qqmusic-playlists") ? $("#qqmusic-playlists").checked : false,
     FNMUSIC_NETEASE_PLAYLIST_RESIDENT: $("#netease-playlist-resident").checked,
     LX_SOURCE_LIST: JSON.stringify(lxSourceList),
   };
@@ -1718,12 +1719,43 @@ $("#lx-url").addEventListener("input", () => {
   // #lx-url 仅为「添加」入口输入框，激活态由列表 active 标记决定，与它无关
   syncLxAddButton();
 });
+if ($("#qq-cookie-btn")) {
+  $("#qq-cookie-btn").addEventListener("click", async () => {
+    const raw = ($("#qq-cookie").value || "").trim();
+    const note = $("#qq-cookie-note");
+    if (!raw) {
+      note.textContent = "请先粘贴 Cookie";
+      return;
+    }
+    const btn = $("#qq-cookie-btn");
+    btn.disabled = true;
+    note.textContent = "正在校验…";
+    try {
+      const d = await api("/api/qqmusic/auth/cookie", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cookie: raw }),
+      });
+      const info = (d && d.data) || {};
+      const who = info.nickname || info.musicid || "已登录用户";
+      note.textContent = `登录成功：${who}`;
+      $("#qq-cookie").value = "";
+      $("#qq-qr-check").textContent = `当前登录：${who}${info.svip ? "（SVIP）" : ""}`;
+      toast(`QQ 音乐登录成功${info.svip ? "，SVIP 权益已生效" : ""}`, "ok");
+    } catch (exc) {
+      note.textContent = "登录失败：" + exc.message;
+    } finally {
+      btn.disabled = false;
+    }
+  });
+}
+
 if ($("#lx-name")) {
   $("#lx-name").addEventListener("input", () => markDirty());
 }
 $$("input[name=quality]").forEach((el) => el.addEventListener("change", () => markDirty("音质偏好需保存后生效")));
 $$("input[name=dl-quality]").forEach((el) => el.addEventListener("change", () => markDirty("下载音质需保存后生效")));
-["#recommend-hot", "#recommend-daily", "#search-deep", "#tee-enabled", "#fav-autobind", "#auto-cover", "#lyric-auto-dl", "#netease-my-playlists", "#netease-playlist-resident"].forEach((sel) =>
+["#recommend-hot", "#recommend-daily", "#search-deep", "#tee-enabled", "#fav-autobind", "#auto-cover", "#lyric-auto-dl", "#netease-my-playlists", "#netease-playlist-resident", "#qqmusic-playlists"].forEach((sel) =>
   $(sel).addEventListener("change", () => markDirty()));
 
 function updateTeeCountLabel() {

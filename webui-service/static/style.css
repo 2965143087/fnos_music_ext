@@ -411,3 +411,6 @@ input[type="radio"] { accent-color: var(--accent); margin-top: 4px; }
   .lx-item-btns { justify-content: flex-end; }
   #qr-img { width: min(220px, 72vw); height: auto; aspect-ratio: 1; }
 }
+
+/* Cookie 登录输入框：与 .input 同色系，允许纵向拉伸 */
+textarea.input { font-family: inherit; resize: vertical; min-height: 68px; line-height: 1.5; }

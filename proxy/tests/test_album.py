@@ -2,9 +2,9 @@
 
 覆盖 2.5.0 新增能力：
   - build_online_track 对三个音源统一登记伪装专辑 guid（点击专辑可反解）
-  - /music/api/v1/album/detail 分源合成（netease 真实接口 / musicdl 聚合 / 官方透传）
+  - /music/api/v1/album/detail 分源合成（netease 真实接口 / qqmusic 聚合 / 官方透传）
   - /music/api/v1/track/album-detail/list 分页下发合成曲目
-  - /music/api/v1/search/album 官方结果后合并在线专辑（netease 真实 + musicdl/lx 聚合）
+  - /music/api/v1/search/album 官方结果后合并在线专辑（netease 真实 + lx 聚合）
 """
 import httpx
 import pytest
@@ -49,7 +49,7 @@ def clean_album_state(tmp_path, monkeypatch):
 
 @pytest.mark.parametrize("item", [
     {"id": "netease:123", "source": "netease", "title": "晴天", "artist": "周杰伦", "album": "叶惠美", "duration_s": 269, "ext": "flac"},
-    {"id": "migu:9", "source": "migu", "title": "晴天", "artist": "周杰伦", "album": "叶惠美", "duration_s": 269, "ext": "mp3"},
+    {"id": "qqmusic:9", "source": "qqmusic", "title": "晴天", "artist": "周杰伦", "album": "叶惠美", "duration_s": 269, "ext": "mp3"},
     {"id": "lx:kg:abc123", "source": "lx", "title": "晴天", "artist": "周杰伦", "album": "叶惠美", "duration_s": 269, "ext": "flac"},
 ])
 def test_build_online_track_registers_album_for_all_sources(item):
@@ -185,26 +185,24 @@ def test_official_album_forwards_untouched():
         assert tracks["data"]["list"][0]["guid"] == "official-track-1"
 
 
-def test_musicdl_album_aggregate_detail(monkeypatch):
-    """musicdl 专辑：从内存搜索缓存聚合同名同源曲目合成详情。"""
+def test_online_album_aggregate_detail(monkeypatch):
+    """在线专辑：从内存搜索缓存聚合同名同源曲目合成详情。"""
     monkeypatch.setitem(CONF, "netease_enabled", False)
-    item = {"id": "migu:9", "source": "migu", "title": "晴天", "artist": "周杰伦", "album": "叶惠美", "duration_s": 269, "ext": "mp3"}
+    item = {"id": "qqmusic:9", "source": "qqmusic", "title": "晴天", "artist": "周杰伦", "album": "叶惠美", "duration_s": 269, "ext": "mp3"}
     vo = build_online_track(item)
     fake = fake_official_guid(f"{vo['guid']}:album")
     # 搜索缓存里再放两首同专辑曲目（一首同源同名专辑、一首不同专辑作对照）；
     # ts 必须新鲜，否则 _clean_search_cache 会按 TTL 清掉
     import time as _time
     _SEARCH_CACHE["scope:叶惠美"] = {"items": [
-        {"id": "migu:9", "source": "migu", "title": "晴天", "artist": "周杰伦", "album": "叶惠美", "duration_s": 269, "ext": "mp3"},
-        {"id": "migu:10", "source": "migu", "title": "懦夫", "artist": "周杰伦", "album": "叶惠美", "duration_s": 251, "ext": "mp3"},
-        {"id": "migu:11", "source": "migu", "title": "七里香", "artist": "周杰伦", "album": "七里香", "duration_s": 299, "ext": "mp3"},
+        {"id": "qqmusic:9", "source": "qqmusic", "title": "晴天", "artist": "周杰伦", "album": "叶惠美", "duration_s": 269, "ext": "mp3"},
+        {"id": "qqmusic:10", "source": "qqmusic", "title": "懦夫", "artist": "周杰伦", "album": "叶惠美", "duration_s": 251, "ext": "mp3"},
+        {"id": "qqmusic:11", "source": "qqmusic", "title": "七里香", "artist": "周杰伦", "album": "七里香", "duration_s": 299, "ext": "mp3"},
         {"id": "netease:77", "source": "netease", "title": "跨源歌", "artist": "X", "album": "叶惠美", "duration_s": 200, "ext": "mp3"},
     ], "ts": _time.time(), "keyword": "叶惠美", "scope": "scope", "credentials": "", "config": {}, "task": None}
 
     app.state.upstream_client = httpx.AsyncClient(
         transport=httpx.MockTransport(_upstream_official_handler), base_url="http://unix")
-    app.state.musicdl_client = httpx.AsyncClient(
-        transport=httpx.MockTransport(lambda r: httpx.Response(404)), base_url="http://127.0.0.1:8768")
     app.state.musicbox_client = httpx.AsyncClient(
         transport=httpx.MockTransport(lambda r: httpx.Response(404, json={"ok": False})), base_url="http://127.0.0.1:8770")
     with TestClient(app) as client:
@@ -218,14 +216,12 @@ def test_musicdl_album_aggregate_detail(monkeypatch):
 def test_album_detail_not_synthesizable_returns_business_error(monkeypatch):
     """无法合成（无专辑名且无缓存）返回业务错误，绝不透传官方"无此专辑"。"""
     monkeypatch.setitem(CONF, "netease_enabled", False)
-    item = {"id": "migu:404", "source": "migu", "title": "无专辑歌", "artist": "X", "duration_s": 100, "ext": "mp3"}
+    item = {"id": "qqmusic:404", "source": "qqmusic", "title": "无专辑歌", "artist": "X", "duration_s": 100, "ext": "mp3"}
     vo = build_online_track(item)
     fake = fake_official_guid(f"{vo['guid']}:album")
 
     app.state.upstream_client = httpx.AsyncClient(
         transport=httpx.MockTransport(_upstream_official_handler), base_url="http://unix")
-    app.state.musicdl_client = httpx.AsyncClient(
-        transport=httpx.MockTransport(lambda r: httpx.Response(404)), base_url="http://127.0.0.1:8768")
     app.state.musicbox_client = httpx.AsyncClient(
         transport=httpx.MockTransport(lambda r: httpx.Response(404, json={"ok": False})), base_url="http://127.0.0.1:8770")
     with TestClient(app) as client:
@@ -238,11 +234,10 @@ def test_album_detail_not_synthesizable_returns_business_error(monkeypatch):
 
 
 def test_search_album_merges_online_albums(monkeypatch):
-    """/search/album：官方本地专辑在前，netease 真实专辑与 musicdl 聚合专辑合并，
+    """/search/album：官方本地专辑在前，netease 真实专辑与 lx 聚合专辑合并，
     与官方同名去重；netease 专辑登记真实 album_id 可直达详情。"""
     monkeypatch.setitem(CONF, "netease_enabled", True)
-    monkeypatch.setitem(CONF, "musicdl_enabled", True)
-    monkeypatch.setitem(CONF, "lx_enabled", False)
+    monkeypatch.setitem(CONF, "lx_enabled", True)
 
     def musicbox_handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/api/v1/search" and request.url.params.get("type") == "album":
@@ -258,11 +253,13 @@ def test_search_album_merges_online_albums(monkeypatch):
             ]})
         return httpx.Response(404, json={"ok": False})
 
-    def musicdl_handler(request: httpx.Request) -> httpx.Response:
-        if request.url.path == "/search":
-            return httpx.Response(200, json={"items": [
-                {"id": "migu:9", "source": "migu", "title": "晴天", "artist": "周杰伦", "album": "叶惠美", "duration_s": 269, "ext": "mp3"},
-                {"id": "migu:10", "source": "migu", "title": "懦夫", "artist": "周杰伦", "album": "叶惠美", "duration_s": 251, "ext": "mp3"},
+    def lx_handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/v1/search":
+            return httpx.Response(200, json={"ok": True, "items": [
+                {"id": "lx:kg:9", "source": "lx", "title": "爱在西元前", "artist": "周杰伦",
+                 "album": "范特西", "duration_s": 224, "ext": "mp3"},
+                {"id": "lx:kg:10", "source": "lx", "title": "简单爱", "artist": "周杰伦",
+                 "album": "范特西", "duration_s": 270, "ext": "mp3"},
             ]})
         return httpx.Response(404)
 
@@ -270,16 +267,16 @@ def test_search_album_merges_online_albums(monkeypatch):
         transport=httpx.MockTransport(_upstream_official_handler), base_url="http://unix")
     app.state.musicbox_client = httpx.AsyncClient(
         transport=httpx.MockTransport(musicbox_handler), base_url="http://127.0.0.1:8770")
-    app.state.musicdl_client = httpx.AsyncClient(
-        transport=httpx.MockTransport(musicdl_handler), base_url="http://127.0.0.1:8768")
+    app.state.lx_client = httpx.AsyncClient(
+        transport=httpx.MockTransport(lx_handler), base_url="http://127.0.0.1:8772")
     with TestClient(app) as client:
         body = client.get("/music/api/v1/search/album", params={"keyword": "叶惠美"}).json()
         assert body["code"] == 0
         names = [x["name"] for x in body["data"]["list"]]
-        # 官方在前；netease 真实"叶惠美"与 musicdl 聚合"叶惠美"同名只保留一个；撞名的 790 被去重
+        # 官方在前；netease 真实"叶惠美"与 lx 聚合"范特西"各保留一张；撞名的 790 被去重
         assert names[0] == "官方专辑"
         assert names.count("叶惠美") == 1
-        assert "叶惠美" in names
+        assert "叶惠美" in names and "范特西" in names
         assert body["data"]["total"] >= 2
         # 在线专辑条目 id 为伪装 32-hex
         online = [x for x in body["data"]["list"] if x["name"] == "叶惠美"][0]
@@ -301,7 +298,7 @@ def test_search_album_official_error_passthrough(monkeypatch):
         return httpx.Response(200, json={"code": 401, "msg": "unauthorized", "data": None})
 
     monkeypatch.setitem(CONF, "netease_enabled", False)
-    monkeypatch.setitem(CONF, "musicdl_enabled", False)
+    monkeypatch.setitem(CONF, "lx_enabled", False)
     app.state.upstream_client = httpx.AsyncClient(
         transport=httpx.MockTransport(deny_handler), base_url="http://unix")
     with TestClient(app) as client:
@@ -314,25 +311,25 @@ def test_register_fake_album_richer_snapshot_overrides_stub():
     更全的后到信息必须能覆盖它，否则专辑合成/命名永远拿到残缺条目。"""
     from proxy.app import _item_meta_richness
 
-    stub = {"id": "kuwo:228908", "source": "kuwo"}
-    full = {"id": "kuwo:228908", "source": "kuwo", "title": "晴天", "artist": "周杰伦",
+    stub = {"id": "qqmusic:228908", "source": "qqmusic"}
+    full = {"id": "qqmusic:228908", "source": "qqmusic", "title": "晴天", "artist": "周杰伦",
             "album": "叶惠美", "duration_s": 269, "ext": "flac"}
     assert _item_meta_richness(stub) == 0 and _item_meta_richness(full) == 2
 
-    build_online_track({"id": "kuwo:228908", "source": "kuwo", "title": "无专辑歌", "artist": "X"})  # 无关条目隔离
+    build_online_track({"id": "qqmusic:228908", "source": "qqmusic", "title": "无专辑歌", "artist": "X"})  # 无关条目隔离
     # 第一次：stub 先登记（残缺）
     register = __import__("proxy.app", fromlist=["register_fake_album"]).register_fake_album
-    register("online:kuwo:228908", "", stub)
-    fake = fake_official_guid("online:kuwo:228908:album")
+    register("online:qqmusic:228908", "", stub)
+    fake = fake_official_guid("online:qqmusic:228908:album")
     entry = resolve_fake_album(fake)
     assert entry["album"] == ""
     # 第二次：全量信息应覆盖 stub，专辑名补齐
-    register("online:kuwo:228908", "叶惠美", full)
+    register("online:qqmusic:228908", "叶惠美", full)
     entry = resolve_fake_album(fake)
     assert entry["album"] == "叶惠美"
     assert entry["item"].get("title") == "晴天"
     # 反向：stub 不得降级已全量的条目
-    register("online:kuwo:228908", "", stub)
+    register("online:qqmusic:228908", "", stub)
     entry = resolve_fake_album(fake)
     assert entry["album"] == "叶惠美" and entry["item"].get("title") == "晴天"
 

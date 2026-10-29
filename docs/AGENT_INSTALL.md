@@ -16,7 +16,7 @@
 2. 禁止 patch trim-music 官方二进制，禁止写入官方 music.db（只读读取 play_history 进行口味分析可以）。
 3. 禁止把 API Key、密码、token 写进源码、测试、README、commit、issue 或 echo 打印到终端日志。所有密钥仅保存在仓库根目录 .env（文件权限 chmod 600）。
 4. 绝对禁止擅自安装 Docker 引擎：fnOS 的 Docker 必须在「应用中心」由系统管理员安装。v2.0.0 仅支持 Docker 部署：若环境未安装 Docker 或 docker daemon 不可用，install.sh 会直接报错退出——此时应报告用户先安装 Docker，严禁执行 apt-get install docker 等命令，严禁尝试任何 host 模式替代。
-5. 部署形态：核心代理由宿主机 systemd（项目根 .venv-proxy 虚拟环境）运行并接管 /var/run/trim_music.socket；音源（musicdl 8768 / musicbox 8770 / lxmusic 8772）与 WebUI（8774）全部在单容器 fnmusic-sources 内按需运行。
+5. 部署形态：核心代理由宿主机 systemd（项目根 .venv-proxy 虚拟环境）运行并接管 /var/run/trim_music.socket；音源（musicbox 8770 / qqmusic 8775 / lxmusic 8772）与 WebUI（8774）全部在单容器 fnmusic-sources 内按需运行。
 6. 音源三选一互斥：--sources 与 .env 的三个 FNMUSIC_*_ENABLED 开关只能有一个为 true，跨音源组合会被 install.sh 拒绝。换源属于运行期操作（WebUI 或改 .env 后 ./extend.sh），不要通过重装切换。
 7. 洛雪 lxmusic 源：播放解析依赖用户提供的洛雪自定义源脚本 URL（LX_SOURCE_URL）。非交互安装选 lxmusic 时必须携带 --lx-source-url '<URL>'；安装器会在容器内做全链路校验（下载→初始化→搜索→解析→探活）。校验失败分类提示，Agent 应把原始错误转告用户而不是自行编造 URL。仅当用户明确接受“源暂不可用也要先装好”时才可追加 --lx-skip-verify（跳过校验直接激活，源状态装好后在 WebUI 查看）。
 8. 一键扩展 ./extend.sh 与一键还原 ./restore.sh（含彻底清理 ./restore.sh --full）必须始终保持可用；扩展失败必须安全秒级回滚到官方直连。
@@ -39,8 +39,8 @@
 推荐命令（按用户所选音源三选一）：
   - 网易云 musicbox（含 WebUI）：
     ./install.sh --non-interactive --sources musicbox --webui --extend
-  - musicdl（默认精选酷我+咪咕；平台粒度用 musicdl-<短名> 或编号）：
-    ./install.sh --non-interactive --sources musicdl --extend
+  - QQ 音乐 qqmusic（含 WebUI，装好后到管理页扫码登录）：
+    ./install.sh --non-interactive --sources qqmusic --webui --extend
   - 洛雪 lxmusic（--lx-source-url 必填）：
     ./install.sh --non-interactive --sources lxmusic --lx-source-url '<URL>' --extend
   - 保存大模型接口（可选；密钥仅写入 .env，禁止 echo）：
@@ -59,8 +59,8 @@
      curl -s --unix-socket /var/run/trim_music.socket http://localhost/_ext/healthz
      期望 "ok": true 且 "upstream": "ok"；已启用音源为 "ok"，未启用为 "disabled"。
   2. 所选音源容器内端点（仅启用项）：
-     curl -s http://127.0.0.1:8768/healthz   # musicdl
      curl -s http://127.0.0.1:8770/healthz   # musicbox
+     curl -s http://127.0.0.1:8775/healthz   # qqmusic
      curl -s http://127.0.0.1:8772/healthz   # lxmusic（检查 user_source.initialized）
   3. Shell 语法检查：bash -n install.sh extend.sh restore.sh proxy/run_proxy.sh
   4. Python 语法检查：.venv-proxy/bin/python -m py_compile proxy/app.py proxy/recommend.py
@@ -73,7 +73,7 @@
 【完成汇报规范】
 任务完成后用简短中文输出总结，内容包含：
 1. 部署形态确认（Docker 单容器 + 宿主机核心代理）与环境预检结论；
-2. 所选音源与端口（musicdl 127.0.0.1:8768 / musicbox 127.0.0.1:8770 / lxmusic 127.0.0.1:8772）及 WebUI 是否安装（127.0.0.1:8774，飞牛管理员打开）；
+2. 所选音源与端口（musicbox 127.0.0.1:8770 / qqmusic 127.0.0.1:8775 / lxmusic 127.0.0.1:8772）及 WebUI 是否安装（127.0.0.1:8774，飞牛管理员打开）；
 3. 洛雪源校验结论（若适用：源名称/版本/推导平台）；每日推荐是否开启（严禁复述敏感密钥）；
 4. healthz 接口探测响应 JSON；
 5. extend 链路接管与验收状态。

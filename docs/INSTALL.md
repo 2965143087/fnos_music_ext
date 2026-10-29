@@ -33,14 +33,13 @@ chmod +x install.sh extend.sh restore.sh proxy/run_proxy.sh
 v2.8.0 起支持两种音源部署形态（`.env` 的 `FNMUSIC_DEPLOY_MODE`），核心代理始终在宿主机 systemd 运行：
 
 1. **核心代理（宿主机 systemd，两形态相同）**：`fnmusic-ext.service` 运行在项目内独立虚拟环境 `.venv-proxy`，负责零侵入接管 `/var/run/trim_music.socket`。核心代理必须在宿主机运行——塞入容器会面临跨容器 socket 权限穿透问题。
-2. **音源 · Docker 单容器（默认）**：`fnmusic-sources` 一个容器内含 musicdl / musicbox / qqmusic / lxmusic / WebUI 五个程序（supervisor 管理），**按 `.env` 只启动当前所选音源进程**，其余不驻留内存。运行期切源在 WebUI 内完成（写配置 + 同容器秒级 stop/start），无需重建容器。
-3. **音源 · 原生宿主机（无 Docker）**：同五个程序由宿主机 systemd unit `fnmusic-sources.service` 内的 supervisord 按需拉起，代码直接运行在仓库目录，Python 依赖装在 `.venv-sources`，lxserver 预编译包落位 `.lxserver/`，进程套接字与日志在 `sources-native/`。音源直接监听与容器发布一致的 `127.0.0.1` 端口，对外契约（端口/接口/`.env`/数据目录）与 Docker 形态完全一致。
+2. **音源 · Docker 单容器（默认）**：`fnmusic-sources` 一个容器内含 musicbox / qqmusic / lxmusic / WebUI 四个程序（supervisor 管理），**按 `.env` 只启动当前所选音源进程**，其余不驻留内存。运行期切源在 WebUI 内完成（写配置 + 同容器秒级 stop/start），无需重建容器。
+3. **音源 · 原生宿主机（无 Docker）**：同四个程序由宿主机 systemd unit `fnmusic-sources.service` 内的 supervisord 按需拉起，代码直接运行在仓库目录，Python 依赖装在 `.venv-sources`，lxserver 预编译包落位 `.lxserver/`，进程套接字与日志在 `sources-native/`。音源直接监听与容器发布一致的 `127.0.0.1` 端口，对外契约（端口/接口/`.env`/数据目录）与 Docker 形态完全一致。
 
 两种形态共用同一份 `.env` 与 `sources-data/` 数据目录；**同机互斥**，切换形态用 `./install.sh --deploy docker|native`（跨目录追加 `--adopt`）。
 
 | 端口 | 绑定地址 | 用途 |
 | :--- | :--- | :--- |
-| 8768 | 127.0.0.1 | musicdl 音源（仅代理访问） |
 | 8770 | 127.0.0.1 | musicbox 音源（仅本机；扫码走已登录的管理页） |
 | 8775 | 127.0.0.1 | qqmusic 音源（仅本机；扫码走已登录的管理页） |
 | 8772 | 127.0.0.1 | lxmusic 音源（仅代理访问） |
@@ -56,7 +55,7 @@ v2.8.0 起支持两种音源部署形态（`.env` 的 `FNMUSIC_DEPLOY_MODE`）�
 
 从 [GitHub Releases](https://github.com/javycoder/fnos_music_ext/releases) 下载最新 `fnmusic-ext-<版本>.fpk`，在 fnOS「应用中心 → 手动安装」选择该文件：
 
-1. 向导中选择**初始音源**（musicdl / musicbox / qqmusic / lxmusic，选 lxmusic 需填写源脚本 URL）；
+1. 向导中选择**初始音源**（musicbox / qqmusic / lxmusic，选 lxmusic 需填写源脚本 URL）；
 2. 保持「安装完成后立即启用扩展」开启，安装即自动完成容器构建、代理接管与全链路验收；
 3. 桌面出现「fnMusic 扩展管理」图标，用飞牛管理员点击打开管理页（`/app/fnmusic-ext`）。
 
@@ -84,11 +83,10 @@ sudo appcenter-cli uninstall fnmusic-ext                # 卸载（自动备份�
 
 向导自动执行环境预检，依次引导：
 
-1. **音源四选一**（v2.0.0 起互斥单选，v2.11.0 起新增 QQ 音乐）：
+1. **音源三选一**（v2.0.0 起互斥单选，v2.11.0 起新增 QQ 音乐）：
    - `1` 网易云 musicbox：安装后自动进入扫码登录；
    - `2` QQ 音乐 qqmusic：安装后在管理页「音乐源 → QQ 音乐」扫码登录（未登录仅 128k 试听）；
-   - `3` musicdl：进入平台多选子菜单（默认精选酷我+咪咕；全部平台编号见 [../musicdl-service/PLATFORMS.md](../musicdl-service/PLATFORMS.md)）；
-   - `4` 洛雪 lxmusic：直接安装（无源状态），源脚本装好在管理页 WebUI 配置；也可在安装命令附 `--lx-source-url`（URL / 本机 `.js` 路径），安装时进行「下载→初始化→搜索→解析→探活」全链路校验；
+   - `3` 洛雪 lxmusic：直接安装（无源状态），源脚本装好在管理页 WebUI 配置；也可在安装命令附 `--lx-source-url`（URL / 本机 `.js` 路径），安装时进行「下载→初始化→搜索→解析→探活」全链路校验；
 2. **是否安装管理 WebUI**（仅本机 8774，默认否；打开时走飞牛管理员登录）；
 3. **大模型接口（可选）**：OpenAI 兼容 API；仅保存接口不会启用用途。安装后在管理页明确勾选「大模型用于猜你喜欢 / 每日推荐」，两个用途默认都关闭；
 4. **一键启用**：确认后自动调用 `./extend.sh` 接管验收。
@@ -102,9 +100,6 @@ sudo appcenter-cli uninstall fnmusic-ext                # 卸载（自动备份�
 # QQ 音乐 + WebUI（装好后到管理页「音乐源 → QQ 音乐」扫码登录）
 ./install.sh --non-interactive --sources qqmusic --webui --extend
 
-# musicdl（酷我+咪咕；平台粒度用短名或编号）
-./install.sh --non-interactive --sources musicdl-kuwo,musicdl-migu --extend
-
 # 洛雪自定义源（--lx-source-url 可选：http(s) URL / 本机 .js 路径 / 留空无源安装）
 ./install.sh --non-interactive --sources lxmusic \
   --lx-source-url 'https://example.com/your-source.js' --extend
@@ -113,12 +108,12 @@ sudo appcenter-cli uninstall fnmusic-ext                # 卸载（自动备份�
 ./install.sh --non-interactive --sources lxmusic --webui --extend  # 无源安装，装后在管理页配置
 
 # 保存大模型接口（密钥仅写入本地 .env，权限 600）；用途仍需在管理页明确启用
-./install.sh --non-interactive --sources musicdl --enable-recommend \
+./install.sh --non-interactive --sources qqmusic --enable-recommend \
   --llm-base-url 'https://api.openai.com/v1' \
   --llm-api-key '<KEY>' --llm-model 'gpt-4o-mini' --extend
 ```
 
-常用参数：`--sources`（音源四选一：musicdl / musicbox / qqmusic / lxmusic）、`--lx-source-url`（可选：http(s) URL 或
+常用参数：`--sources`（音源三选一：musicbox / qqmusic / lxmusic）、`--lx-source-url`（可选：http(s) URL 或
 宿主机 `.js` 路径，路径会自动复制进数据卷）、`--lx-skip-verify`
 （跳过洛雪源可用性校验直接激活，源是否可用装好后在管理页 WebUI 查看）、
 `--webui` / `--no-webui`、`--extend`（安装后自动接管）、`--deploy docker|native`
@@ -145,7 +140,7 @@ sudo appcenter-cli uninstall fnmusic-ext                # 卸载（自动备份�
 - **Node.js ≥ 20**（lxserver engines 契约要求）：
   Node 运行时按「显式配置 `FNMUSIC_NODE_BIN` → fnOS 应用中心 `nodejs_v22`（`/var/apps/nodejs_v22`）→ 系统 Node」优先级选择；自动探测仍缺失时尝试 `sudo apt-get` 自动补装，仍不满足时给出应用中心安装指引。
 - **ffmpeg / ffprobe**：
-  优先探测显式配置、系统 PATH 与 fnOS 核心媒体组件（`/usr/trim/lib/mediasrv/ffmpeg` 等）。缺失时尝试 `sudo apt-get` 自动补装；若环境仍缺少 ffmpeg，将安全降级运行：原文件播放与取流不受影响，标准音质转码与音频解码校验受限，musicdl 仍执行取流探针但不因缺少 ffmpeg 误判坏流或强转 MP3。
+  优先探测显式配置、系统 PATH 与 fnOS 核心媒体组件（`/usr/trim/lib/mediasrv/ffmpeg` 等）。缺失时尝试 `sudo apt-get` 自动补装；若环境仍缺少 ffmpeg，将安全降级运行：原文件播放与取流不受影响，标准音质转码与音频解码校验受限，但不会因缺少 ffmpeg 误判坏流或强转 MP3。
 - **依赖缓存与快速跳过**：
   `.venv-proxy` 与 `.venv-sources` 记录解释器身份与依赖清单指纹，依赖未变且本地校验通过时秒级跳过联网；`./extend.sh` 每次校验依赖完整性，可使用 `FNMUSIC_REFRESH_DEPS=1` 强制重新安装。
 - **supervisor**：经 pip 装进 `.venv-sources`（无需系统包），所选 Node 及组件路径完整写入原生配置；
@@ -293,8 +288,8 @@ ls sources-native/                           # supervisor 套接字与各程序�
 curl -s --unix-socket /var/run/trim_music.socket http://localhost/_ext/healthz
 
 # 各音源容器内健康端点
-curl -s http://127.0.0.1:8768/healthz   # musicdl（若启用）
 curl -s http://127.0.0.1:8770/healthz   # musicbox（若启用）
+curl -s http://127.0.0.1:8775/healthz   # qqmusic（若启用）
 curl -s http://127.0.0.1:8772/healthz   # lxmusic（若启用；含 user_source 状态）
 curl -s http://127.0.0.1:8774/healthz   # WebUI（若启用）
 

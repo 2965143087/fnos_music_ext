@@ -56,6 +56,36 @@ EOF
     fi
 }
 
+# 代码同步（issue: 升级后页面仍是旧版）
+# /srv/* 里的服务代码是镜像烘焙的，而 /repo 是宿主机安装目录的 bind mount。
+# 一旦镜像被复用（构建指纹未变、或构建失败回退旧镜像），就会出现
+# 「VERSION/.env 是新版、页面和接口还是旧版」的错配——管理页显示已删除的
+# 音源卡片、新入口缺失，且硬刷新无效（服务端返回的就是旧 HTML）。
+# 这里在拉起任何进程之前把挂载仓库里的服务代码同步进运行目录，
+# 保证容器里跑的永远是安装目录里那一份。
+sync_repo_code() {
+    _repo="${WEBUI_REPO_DIR:-/repo}"
+    [ -d "${_repo}/webui-service" ] || return 0
+    for _svc in musicbox-service qqmusic-service lxmusic-service webui-service; do
+        [ -d "${_repo}/${_svc}" ] || continue
+        mkdir -p "/srv/${_svc}" 2>/dev/null || continue
+        if cp -a "${_repo}/${_svc}/." "/srv/${_svc}/" 2>/dev/null; then
+            log "已同步 ${_svc} 代码 → /srv/${_svc}"
+        else
+            log "WARN: 同步 ${_svc} 失败，沿用镜像内版本"
+        fi
+    done
+    # 服务共用的 proxy 模块（与 Dockerfile 的 COPY 清单保持一致）
+    if [ -d "${_repo}/proxy" ]; then
+        for _mod in __init__ env_merge fnlog publicplaylists version llm_usage; do
+            [ -f "${_repo}/proxy/${_mod}.py" ] || continue
+            cp -a "${_repo}/proxy/${_mod}.py" /srv/proxy/ 2>/dev/null || true
+        done
+    fi
+}
+
+sync_repo_code
+
 init_lxserver_config
 
 supervisord -c "$SUP_CONF" &

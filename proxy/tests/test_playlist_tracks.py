@@ -11,9 +11,9 @@ from proxy import recommend as dailyrec
 from proxy.app import CONF, _SEARCH_CACHE, app, fake_official_guid, resolve_real_guid, save_online_favorites
 
 PL1 = "pl-official-1"
-FAKE_KUWO1 = "online:kuwo:228908"
-FAKE_KUWO2 = "online:kuwo:228909"
-FAKE_MIGU = "online:migu:600908000006810533"
+FAKE_QQ1 = "online:qqmusic:228908"
+FAKE_QQ2 = "online:qqmusic:228909"
+FAKE_QQ3 = "online:qqmusic:600908000006810533"
 
 
 @pytest.fixture(autouse=True)
@@ -25,7 +25,7 @@ def setup_plt_env(tmp_path, monkeypatch):
     os.makedirs(fav_dir, exist_ok=True)
     monkeypatch.setitem(CONF, "plt_dir", plt_dir)
     monkeypatch.setitem(CONF, "fav_dir", fav_dir)
-    monkeypatch.setitem(CONF, "musicdl_enabled", True)
+    monkeypatch.setitem(CONF, "qqmusic_enabled", True)
     monkeypatch.setitem(CONF, "lyric_field", "data.lyric")
     # 隔离伪装注册表的全局状态（同进程内各测试文件共享 app）
     monkeypatch.setattr(appmod, "_REGISTRY_WARMED", False)
@@ -51,16 +51,15 @@ def _upstream_authed(handler=None):
     return httpx.AsyncClient(transport=httpx.MockTransport(wrapped), base_url="http://unix")
 
 
-def _musicdl_info():
+def _qqmusic_info():
     def handler(request: httpx.Request) -> httpx.Response:
-        if request.url.path == "/info":
-            return httpx.Response(200, json={
-                "ok": True, "id": "kuwo:228908", "source": "kuwo",
-                "title": "晴天", "artist": "周杰伦", "album": "叶惠美",
-                "duration_s": 269, "ext": "mp3",
-            })
+        if request.url.path.endswith("/info"):
+            return httpx.Response(200, json={"ok": True, "data": {
+                "song_name": "晴天", "artist": "周杰伦", "album_name": "叶惠美",
+                "duration": 269, "album_pic_url": "",
+            }})
         return httpx.Response(404)
-    return httpx.AsyncClient(transport=httpx.MockTransport(handler), base_url="http://127.0.0.1:8768")
+    return httpx.AsyncClient(transport=httpx.MockTransport(handler), base_url="http://127.0.0.1:8775")
 
 
 def _read_plt(user="user-a") -> dict:
@@ -71,15 +70,15 @@ def _read_plt(user="user-a") -> dict:
         return json.load(f).get("items") or {}
 
 
-def _add_online_track(client, guid=FAKE_KUWO1, playlist=PL1):
+def _add_online_track(client, guid=FAKE_QQ1, playlist=PL1):
     fake = fake_official_guid(guid)
     return client.post("/music/api/v1/playlist/add-track", json={"guid": playlist, "trackGUIDs": [fake]})
 
 
 def test_add_track_online_authorized():
-    """全在线批次：code:0 落盘按歌单分桶，快照带 musicdl 元数据。"""
+    """全在线批次：code:0 落盘按歌单分桶，快照带在线元数据。"""
     app.state.upstream_client = _upstream_authed()
-    app.state.musicdl_client = _musicdl_info()
+    app.state.qqmusic_client = _qqmusic_info()
     with TestClient(app) as client:
         resp = _add_online_track(client)
         assert resp.status_code == 200
@@ -87,7 +86,7 @@ def test_add_track_online_authorized():
     items = _read_plt()
     bucket = items[PL1]
     assert len(bucket) == 1
-    assert bucket[0]["guid"] == FAKE_KUWO1
+    assert bucket[0]["guid"] == FAKE_QQ1
     assert bucket[0]["track"]["title"] == "晴天"
     assert bucket[0]["track"]["artists"][0]["name"] == "周杰伦"
 
@@ -135,14 +134,14 @@ def test_add_track_mixed_batch_split():
         return httpx.Response(500)
 
     app.state.upstream_client = _upstream_authed(handler)
-    app.state.musicdl_client = _musicdl_info()
+    app.state.qqmusic_client = _qqmusic_info()
     with TestClient(app) as client:
-        fake = fake_official_guid(FAKE_KUWO1)
+        fake = fake_official_guid(FAKE_QQ1)
         resp = client.post("/music/api/v1/playlist/add-track",
                            json={"guid": PL1, "trackGUIDs": [fake, "official-1"]})
         assert resp.json()["code"] == 0
     assert seen == [{"guid": PL1, "trackGUIDs": ["official-1"]}]
-    assert [it["guid"] for it in _read_plt()[PL1]] == [FAKE_KUWO1]
+    assert [it["guid"] for it in _read_plt()[PL1]] == [FAKE_QQ1]
 
 
 def test_add_track_mixed_official_failure_blocks_local():
@@ -154,7 +153,7 @@ def test_add_track_mixed_official_failure_blocks_local():
 
     app.state.upstream_client = _upstream_authed(handler)
     with TestClient(app) as client:
-        fake = fake_official_guid(FAKE_KUWO1)
+        fake = fake_official_guid(FAKE_QQ1)
         resp = client.post("/music/api/v1/playlist/add-track",
                            json={"guid": PL1, "trackGUIDs": [fake, "official-1"]})
         assert resp.json()["code"] == 100002
@@ -164,7 +163,7 @@ def test_add_track_mixed_official_failure_blocks_local():
 def test_add_track_idempotent():
     """重复加同一首：条目不重复，addedAt 刷新（对齐官方 UNIQUE+added_at 语义）。"""
     app.state.upstream_client = _upstream_authed()
-    app.state.musicdl_client = _musicdl_info()
+    app.state.qqmusic_client = _qqmusic_info()
     with TestClient(app) as client:
         assert _add_online_track(client).json()["code"] == 0
         first = _read_plt()[PL1][0]["addedAt"]
@@ -180,7 +179,7 @@ def test_add_track_recommend_playlist_noop():
     with TestClient(app) as client:
         rec_guid = dailyrec.daily_playlist_guid("20260923", "user-a")
         resp = client.post("/music/api/v1/playlist/add-track",
-                           json={"guid": rec_guid, "trackGUIDs": [fake_official_guid(FAKE_KUWO1)]})
+                           json={"guid": rec_guid, "trackGUIDs": [fake_official_guid(FAKE_QQ1)]})
         assert resp.json() == {"code": 0, "msg": "", "data": None}
     assert _read_plt() == {}
 
@@ -188,10 +187,10 @@ def test_add_track_recommend_playlist_noop():
 def test_remove_track_online_idempotent():
     """删在线条目：本地清桶；再删（桶已空）仍 code:0。"""
     app.state.upstream_client = _upstream_authed()
-    app.state.musicdl_client = _musicdl_info()
+    app.state.qqmusic_client = _qqmusic_info()
     with TestClient(app) as client:
         _add_online_track(client)
-        fake = fake_official_guid(FAKE_KUWO1)
+        fake = fake_official_guid(FAKE_QQ1)
         resp = client.post("/music/api/v1/playlist/remove-track", json={"guid": PL1, "trackGUIDs": [fake]})
         assert resp.json()["code"] == 0
         assert _read_plt() == {}
@@ -212,16 +211,16 @@ def test_remove_track_mixed_split():
         return httpx.Response(500)
 
     app.state.upstream_client = _upstream_authed(handler)
-    app.state.musicdl_client = _musicdl_info()
+    app.state.qqmusic_client = _qqmusic_info()
     with TestClient(app) as client:
-        fake1 = fake_official_guid(FAKE_KUWO1)
-        fake2 = fake_official_guid(FAKE_KUWO2)
+        fake1 = fake_official_guid(FAKE_QQ1)
+        fake2 = fake_official_guid(FAKE_QQ2)
         client.post("/music/api/v1/playlist/add-track", json={"guid": PL1, "trackGUIDs": [fake1, fake2]})
         resp = client.post("/music/api/v1/playlist/remove-track",
                            json={"guid": PL1, "trackGUIDs": [fake1, "official-1"]})
         assert resp.json()["code"] == 0
     assert seen == [{"guid": PL1, "trackGUIDs": ["official-1"]}]
-    assert [it["guid"] for it in _read_plt()[PL1]] == [FAKE_KUWO2]
+    assert [it["guid"] for it in _read_plt()[PL1]] == [FAKE_QQ2]
 
 
 def _official_track_list_handler(official_tracks, total=None):
@@ -261,10 +260,10 @@ _OFFICIAL_TRACKS_2 = [
 def test_playlist_track_list_merge_shape():
     """合并下发：官方 2 + 本地 2 在线 → total=4；在线条目伪装 id 可反解、形状对齐官方。"""
     app.state.upstream_client = _upstream_authed(_official_track_list_handler(_OFFICIAL_TRACKS_2))
-    app.state.musicdl_client = _musicdl_info()
+    app.state.qqmusic_client = _qqmusic_info()
     with TestClient(app) as client:
-        _add_online_track(client, FAKE_KUWO1)
-        _add_online_track(client, FAKE_MIGU)
+        _add_online_track(client, FAKE_QQ1)
+        _add_online_track(client, FAKE_QQ3)
         resp = client.get("/music/api/v1/track/playlist-detail/list",
                           params={"playlistGUID": PL1, "page": 1, "size": 50})
         body = resp.json()
@@ -273,8 +272,8 @@ def test_playlist_track_list_merge_shape():
         guids = [it["guid"] for it in body["data"]["list"]]
         assert guids[:2] == ["official-1", "official-2"]
         online_guids = [resolve_real_guid(g) for g in guids[2:]]
-        assert set(online_guids) == {FAKE_KUWO1, FAKE_MIGU}
-        online = next(it for it in body["data"]["list"][2:] if resolve_real_guid(it["guid"]) == FAKE_KUWO1)
+        assert set(online_guids) == {FAKE_QQ1, FAKE_QQ3}
+        online = next(it for it in body["data"]["list"][2:] if resolve_real_guid(it["guid"]) == FAKE_QQ1)
         assert online["title"] == "晴天"
         assert online["artists"][0]["name"] == "周杰伦"
         assert online["album"]["name"] == "叶惠美"
@@ -285,9 +284,9 @@ def test_playlist_track_list_merge_shape():
 def test_playlist_track_list_pagination_window():
     """分页区间拼接：官方 total=2、在线 3 条、size=2 → 三页不重不漏。"""
     app.state.upstream_client = _upstream_authed(_official_track_list_handler(_OFFICIAL_TRACKS_2))
-    app.state.musicdl_client = _musicdl_info()
+    app.state.qqmusic_client = _qqmusic_info()
     with TestClient(app) as client:
-        for g in (FAKE_KUWO1, FAKE_KUWO2, FAKE_MIGU):
+        for g in (FAKE_QQ1, FAKE_QQ2, FAKE_QQ3):
             _add_online_track(client, g)
         base = "/music/api/v1/track/playlist-detail/list"
         p1 = client.get(base, params={"playlistGUID": PL1, "page": 1, "size": 2}).json()["data"]
@@ -303,16 +302,16 @@ def test_playlist_track_list_pagination_window():
 def test_playlist_track_list_is_favorite_reflects_favorites():
     """在线条目 isFavorite 按本地在线收藏动态置位，不是硬编码 True。"""
     app.state.upstream_client = _upstream_authed(_official_track_list_handler(_OFFICIAL_TRACKS_2))
-    app.state.musicdl_client = _musicdl_info()
-    save_online_favorites("user-a", [{"guid": FAKE_KUWO1, "createdAt": 1, "track": {}}])
+    app.state.qqmusic_client = _qqmusic_info()
+    save_online_favorites("user-a", [{"guid": FAKE_QQ1, "createdAt": 1, "track": {}}])
     with TestClient(app) as client:
-        _add_online_track(client, FAKE_KUWO1)
-        _add_online_track(client, FAKE_MIGU)
+        _add_online_track(client, FAKE_QQ1)
+        _add_online_track(client, FAKE_QQ3)
         data = client.get("/music/api/v1/track/playlist-detail/list",
                           params={"playlistGUID": PL1, "page": 1, "size": 50}).json()["data"]
     by_fake = {it["guid"]: it for it in data["list"]}
-    assert by_fake[fake_official_guid(FAKE_KUWO1)]["isFavorite"] is True
-    assert by_fake[fake_official_guid(FAKE_MIGU)]["isFavorite"] is False
+    assert by_fake[fake_official_guid(FAKE_QQ1)]["isFavorite"] is True
+    assert by_fake[fake_official_guid(FAKE_QQ3)]["isFavorite"] is False
 
 
 def test_playlist_detail_track_count():
@@ -326,10 +325,10 @@ def test_playlist_detail_track_count():
         return httpx.Response(500)
 
     app.state.upstream_client = _upstream_authed(handler)
-    app.state.musicdl_client = _musicdl_info()
+    app.state.qqmusic_client = _qqmusic_info()
     with TestClient(app) as client:
-        _add_online_track(client, FAKE_KUWO1)
-        _add_online_track(client, FAKE_MIGU)
+        _add_online_track(client, FAKE_QQ1)
+        _add_online_track(client, FAKE_QQ3)
         data = client.get("/music/api/v1/playlist/detail", params={"guid": PL1}).json()["data"]
     assert data["trackCount"] == 5
 
@@ -348,9 +347,9 @@ def test_playlist_batch_detail_track_count():
         return httpx.Response(500)
 
     app.state.upstream_client = _upstream_authed(handler)
-    app.state.musicdl_client = _musicdl_info()
+    app.state.qqmusic_client = _qqmusic_info()
     with TestClient(app) as client:
-        _add_online_track(client, FAKE_KUWO1)
+        _add_online_track(client, FAKE_QQ1)
         resp = client.get("/music/api/v1/playlist/batch-detail", params={"guids": f"{PL1},pl-other"})
         plist = {it["guid"]: it for it in resp.json()["data"]["list"]}
     assert plist[PL1]["trackCount"] == 4
@@ -360,19 +359,19 @@ def test_playlist_batch_detail_track_count():
 def test_registry_warm_rebuilds_from_playlist_tracks():
     """重启后注册表清空：warm 能从 playlist_tracks 文件重建伪装映射。"""
     app.state.upstream_client = _upstream_authed()
-    app.state.musicdl_client = _musicdl_info()
+    app.state.qqmusic_client = _qqmusic_info()
     with TestClient(app) as client:
         _add_online_track(client)
-    fake = fake_official_guid(FAKE_KUWO1)
+    fake = fake_official_guid(FAKE_QQ1)
     appmod._FAKE_GUID_REVERSE.clear()
     appmod._REGISTRY_WARMED = False
-    assert resolve_real_guid(fake) == FAKE_KUWO1
+    assert resolve_real_guid(fake) == FAKE_QQ1
 
 
 def test_add_track_storage_write_failure_no_500(tmp_path, monkeypatch):
     """plt_dir 不可写：落盘失败仅告警，仍返回 code:0，绝不 500。"""
     app.state.upstream_client = _upstream_authed()
-    app.state.musicdl_client = _musicdl_info()
+    app.state.qqmusic_client = _qqmusic_info()
     plt_dir = CONF["plt_dir"]
     blocker = os.path.join(str(tmp_path), "plt-blocker")
     with open(blocker, "w", encoding="utf-8") as f:
@@ -393,12 +392,12 @@ def test_playlist_delete_purges_local_bucket():
         return httpx.Response(500)
 
     app.state.upstream_client = _upstream_authed(handler)
-    app.state.musicdl_client = _musicdl_info()
+    app.state.qqmusic_client = _qqmusic_info()
     with TestClient(app) as client:
-        _add_online_track(client, FAKE_KUWO1, PL1)
-        _add_online_track(client, FAKE_MIGU, "pl-official-2")
+        _add_online_track(client, FAKE_QQ1, PL1)
+        _add_online_track(client, FAKE_QQ3, "pl-official-2")
         resp = client.post("/music/api/v1/playlist/delete", json={"guid": PL1})
         assert resp.json()["code"] == 0
         items = _read_plt()
         assert PL1 not in items
-        assert [it["guid"] for it in items["pl-official-2"]] == [FAKE_MIGU]
+        assert [it["guid"] for it in items["pl-official-2"]] == [FAKE_QQ3]

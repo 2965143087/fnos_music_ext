@@ -88,7 +88,7 @@ def test_lifespan_retention_runs_hourly_without_env_changes(monkeypatch, tmp_pat
         test_app = FastAPI()
         async with httpx.AsyncClient(transport=httpx.MockTransport(lambda r: httpx.Response(404))) as client:
             # No sockets/network or unrelated real directory sweeps in this test.
-            for name in ("upstream", "musicdl", "musicbox", "lx", "llm"):
+            for name in ("upstream", "qqmusic", "musicbox", "lx", "llm"):
                 setattr(test_app.state, name + "_client", client)
             async with pa.lifespan(test_app):
                 seconds, log_task = await asyncio.wait_for(log_sleeps.get(), 2)

@@ -92,4 +92,4 @@ killasgroup=true
 stdout_logfile=@RUN@/webui.log
 stdout_logfile_maxbytes=0
 redirect_stderr=true
-environment=WEBUI_REPO_DIR="@REPO@",WEBUI_MUSICDL_URL="http://127.0.0.1:8768",WEBUI_MUSICBOX_URL="http://127.0.0.1:8770",WEBUI_LX_URL="http://127.0.0.1:8772",WEBUI_SUPERVISORCTL="supervisorctl -c @RUN@/supervisord.conf"
+environment=WEBUI_REPO_DIR="@REPO@",WEBUI_MUSICBOX_URL="http://127.0.0.1:8770",WEBUI_LX_URL="http://127.0.0.1:8772",WEBUI_SUPERVISORCTL="supervisorctl -c @RUN@/supervisord.conf"

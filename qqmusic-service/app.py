@@ -10,7 +10,7 @@ import logging
 from contextlib import asynccontextmanager
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, Path, Query, Response, status
+from fastapi import Body, FastAPI, HTTPException, Path, Query, Response, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
@@ -237,6 +237,24 @@ async def auth_login_check(id: str = Query(...)):
     except ImportError as exc:
         raise _lib_missing(exc) from exc
     return {"ok": True, "data": result}
+
+
+@app.post("/api/v1/auth/cookie")
+async def auth_cookie(payload: dict = Body(...)):
+    """用浏览器 Cookie 登录（扫码不可用时的兜底）。"""
+    raw = str((payload or {}).get("cookie") or "")
+    if not raw.strip():
+        raise HTTPException(status_code=400, detail="cookie 不能为空")
+    try:
+        info = await qqmusic_ext.login_with_cookie(raw)
+    except ImportError as exc:
+        raise _lib_missing(exc) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("qqmusic cookie login failed: %s", exc)
+        raise HTTPException(status_code=502, detail=f"Cookie 登录失败: {exc}") from exc
+    return {"ok": True, "data": info}
 
 
 @app.post("/api/v1/auth/logout")

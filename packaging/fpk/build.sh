@@ -103,7 +103,7 @@ rsync -a --delete \
     --exclude='*.pyc' --exclude='*.log' --exclude='*.logzip' --exclude='logs/' --exclude='/logs' \
     --exclude='*.part' --exclude='.DS_Store' \
     --exclude='cache/' --exclude='sources-data/' --exclude='backup/' \
-    --exclude='musicbox-data/' --exclude='musicdl_outputs/' \
+    --exclude='musicbox-data/' \
     --exclude='recommend_cache/' --exclude='public_playlists_cache/' --exclude='play_history/' \
     --exclude='online_favorites/' --exclude='online_favorites.json' \
     --exclude='playlist_tracks/' --exclude='album_registry.json' --exclude='bind_registry.json' \

@@ -20,7 +20,7 @@
 测试结束后原部署不会自动恢复，按结尾提示执行 ./extend.sh 重新启用。
 
 用法（在飞牛 fnOS 设备上）:
-  sudo python3 tests/integration/fpk_lifecycle.py [--fpk PATH] [--sources musicdl]
+  sudo python3 tests/integration/fpk_lifecycle.py [--fpk PATH] [--sources qqmusic]
         [--auto-restore] [--skip-uninstall] [--timeout 600]
 """
 
@@ -342,8 +342,8 @@ def summary() -> int:
 def main() -> int:
     parser = argparse.ArgumentParser(description="fpk 安装/卸载生命周期自动测试（实机）")
     parser.add_argument("--fpk", help="使用指定的 .fpk（默认现场打包）")
-    parser.add_argument("--sources", default="musicdl", choices=["musicdl", "musicbox", "lxmusic"],
-                        help="安装向导注入的初始音源（默认 musicdl）")
+    parser.add_argument("--sources", default="qqmusic", choices=["musicbox", "qqmusic", "lxmusic"],
+                        help="安装向导注入的初始音源（默认 qqmusic）")
     parser.add_argument("--auto-restore", action="store_true",
                         help="自动还原既有部署/卸载旧安装")
     parser.add_argument("--skip-uninstall", action="store_true",

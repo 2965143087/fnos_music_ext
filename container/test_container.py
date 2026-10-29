@@ -27,7 +27,7 @@ def supervisord_conf():
 def test_supervisord_programs_all_autostart_false(supervisord_conf):
     programs = sorted(s for s in supervisord_conf.sections() if s.startswith("program:"))
     assert programs == [
-        "program:lxmusic", "program:lxserver", "program:musicbox", "program:musicdl",
+        "program:lxmusic", "program:lxserver", "program:musicbox",
         "program:qqmusic", "program:webui",
     ]
     for section in programs:
@@ -43,7 +43,6 @@ def test_supervisord_programs_all_autostart_false(supervisord_conf):
 
 def test_supervisord_ports_and_directories(supervisord_conf):
     expected = {
-        "musicdl": ("8001", "/srv/musicdl-service"),
         "musicbox": ("8002", "/srv/musicbox-service"),
         "qqmusic": ("8006", "/srv/qqmusic-service"),
         "lxmusic": ("8003", "/srv/lxmusic-service"),
@@ -88,12 +87,12 @@ def test_env_flag_reads_quoted_and_export_lines(tmp_path):
     env_file.write_text(
         "FNMUSIC_LX_ENABLED='true'\n"
         "export FNMUSIC_WEBUI_ENABLED=\"true\"\n"
-        "FNMUSIC_MUSICDL_ENABLED=false\n",
+        "FNMUSIC_QQMUSIC_ENABLED=false\n",
         encoding="utf-8",
     )
     assert _run_env_flag(env_file, "FNMUSIC_LX_ENABLED") == "true"
     assert _run_env_flag(env_file, "FNMUSIC_WEBUI_ENABLED") == "true"
-    assert _run_env_flag(env_file, "FNMUSIC_MUSICDL_ENABLED") == "false"
+    assert _run_env_flag(env_file, "FNMUSIC_QQMUSIC_ENABLED") == "false"
 
 
 def test_env_flag_env_var_and_default_fallback(tmp_path):
@@ -119,13 +118,12 @@ def test_export_source_env_from_env_file(tmp_path):
     env_file.write_text(
         "LX_SOURCE_URL='https://example.com/lx.js'\n"
         "LX_SOURCE_LIST='[{\"name\":\"a\",\"url\":\"https://example.com/lx.js\",\"active\":true}]'\n"
-        "LX_SOURCES=kw,kg\n"
-        "MUSICDL_SOURCES=kugou,netease\n",
+        "LX_SOURCES=kw,kg\n",
         encoding="utf-8",
     )
     lib = CONTAINER_DIR / "env_flag.sh"
     script = (f'. "{lib}"; export_source_env; printenv LX_SOURCE_URL; printenv LX_SOURCE_LIST; '
-              'printenv LX_SOURCES; printenv MUSICDL_SOURCES\n')
+              'printenv LX_SOURCES\n')
     out = subprocess.run(
         ["sh", "-c", script], capture_output=True, text=True,
         env={"PATH": os.environ["PATH"], "FNMUSIC_ENV_FILE": str(env_file)}, timeout=15,
@@ -134,7 +132,7 @@ def test_export_source_env_from_env_file(tmp_path):
     lines = out.stdout.strip().splitlines()
     assert lines == ["https://example.com/lx.js",
                      "[{\"name\":\"a\",\"url\":\"https://example.com/lx.js\",\"active\":true}]",
-                     "kw,kg", "kugou,netease"]
+                     "kw,kg"]
 
 
 # ---------------------------------------------------------------- entrypoint.sh
@@ -213,17 +211,17 @@ def entrypoint_env(tmp_path):
 
 @pytest.mark.parametrize("env_text,expected", [
     # 单源：只启动所选音源
-    ("FNMUSIC_MUSICDL_ENABLED=true\n", ["start musicdl"]),
+    ("FNMUSIC_QQMUSIC_ENABLED=true\n", ["start qqmusic"]),
     ("FNMUSIC_NETEASE_ENABLED=true\n", ["start musicbox"]),
     ("FNMUSIC_LX_ENABLED=true\n", ["start lxserver", "start lxmusic"]),
     # WebUI 独立开关
     ("FNMUSIC_LX_ENABLED=true\nFNMUSIC_WEBUI_ENABLED=true\n", ["start lxserver", "start lxmusic", "start webui"]),
     ("FNMUSIC_WEBUI_ENABLED=true\n", ["start webui"]),
-    # 旧多源并存：只取第一个命中（musicdl 优先），不重复拉起
-    ("FNMUSIC_MUSICDL_ENABLED=true\nFNMUSIC_NETEASE_ENABLED=true\nFNMUSIC_LX_ENABLED=true\n",
-     ["start musicdl"]),
+    # 旧多源并存：只取第一个命中（netease 优先），不重复拉起
+    ("FNMUSIC_QQMUSIC_ENABLED=true\nFNMUSIC_NETEASE_ENABLED=true\nFNMUSIC_LX_ENABLED=true\n",
+     ["start musicbox"]),
     # 全关：什么源都不启动
-    ("FNMUSIC_MUSICDL_ENABLED=false\n", []),
+    ("FNMUSIC_QQMUSIC_ENABLED=false\n", []),
 ])
 def test_entrypoint_starts_selected_programs(entrypoint_env, env_text, expected):
     assert entrypoint_env(env_text) == expected
@@ -240,25 +238,25 @@ def _seed_musicbox_cookie(tmp_path) -> None:
 def test_entrypoint_resident_starts_musicbox_with_cookie(entrypoint_env, tmp_path):
     """非 musicbox 音源 + 常驻开启 + 盘上有 cookie：拉起 musicbox 供网易账号歌单。"""
     _seed_musicbox_cookie(tmp_path)
-    env_text = ("FNMUSIC_MUSICDL_ENABLED=true\n"
+    env_text = ("FNMUSIC_QQMUSIC_ENABLED=true\n"
                 "FNMUSIC_NETEASE_PLAYLIST_RESIDENT=true\n"
                 "FNMUSIC_NETEASE_MY_PLAYLISTS=true\n")
-    assert entrypoint_env(env_text) == ["start musicdl", "start musicbox"]
+    assert entrypoint_env(env_text) == ["start qqmusic", "start musicbox"]
 
 
 def test_entrypoint_resident_skips_without_cookie(entrypoint_env, tmp_path):
     """常驻开启但盘上无 cookie（未登录）：不拉起，登录后由 webui 对账兜底。"""
-    env_text = ("FNMUSIC_MUSICDL_ENABLED=true\n"
+    env_text = ("FNMUSIC_QQMUSIC_ENABLED=true\n"
                 "FNMUSIC_NETEASE_PLAYLIST_RESIDENT=true\n"
                 "FNMUSIC_NETEASE_MY_PLAYLISTS=true\n")
-    assert entrypoint_env(env_text) == ["start musicdl"]
+    assert entrypoint_env(env_text) == ["start qqmusic"]
 
 
 def test_entrypoint_resident_requires_my_playlists_flag(entrypoint_env, tmp_path):
     """常驻为账号歌单供数：账号歌单开关未开时不空跑 musicbox。"""
     _seed_musicbox_cookie(tmp_path)
-    env_text = "FNMUSIC_MUSICDL_ENABLED=true\nFNMUSIC_NETEASE_PLAYLIST_RESIDENT=true\n"
-    assert entrypoint_env(env_text) == ["start musicdl"]
+    env_text = "FNMUSIC_QQMUSIC_ENABLED=true\nFNMUSIC_NETEASE_PLAYLIST_RESIDENT=true\n"
+    assert entrypoint_env(env_text) == ["start qqmusic"]
 
 
 def test_entrypoint_musicbox_provider_not_duplicated_by_resident(entrypoint_env, tmp_path):
@@ -280,7 +278,6 @@ def test_compose_single_service_layout():
     assert svc["image"] == "fnmusic-sources:latest"
     # 音源和管理页都只发布在 127.0.0.1；浏览器走飞牛网关
     assert sorted(svc["ports"]) == sorted([
-        "127.0.0.1:8768:8001",
         "127.0.0.1:8770:8002",
         "127.0.0.1:8772:8003",
         "127.0.0.1:8774:8004",
@@ -308,11 +305,10 @@ def test_compose_build_args_mirror_passthrough():
 
 def test_dockerfile_assembly():
     text = (CONTAINER_DIR / "Dockerfile").read_text(encoding="utf-8")
-    # 单镜像运行时：python + node(lx 沙箱) + ffmpeg(musicdl 试听) + supervisor
+    # 单镜像运行时：python + node(lx 沙箱) + ffmpeg(音质转码) + supervisor
     for pkg in ("nodejs", "ffmpeg", "supervisor"):
         assert pkg in text
-    for req in ("musicdl-service/requirements.txt", "musicbox-service/requirements.txt",
-                "qqmusic-service/requirements.txt",
+    for req in ("musicbox-service/requirements.txt", "qqmusic-service/requirements.txt",
                 "lxmusic-service/requirements.txt", "webui-service/requirements.txt"):
         assert req in text
     assert "container/lxserver.version" in text
@@ -361,7 +357,7 @@ def test_dockerfile_network_fallback_resilience():
     DNS/NSS，缺失或失败还可能被 set -e 打死，因此改为不探测、始终注入。
     """
     text = (CONTAINER_DIR / "Dockerfile").read_text(encoding="utf-8")
-    apt_step = text.split("# nodejs（洛雪自定义源")[1].split("# 四个服务的")[0]
+    apt_step = text.split("# nodejs（洛雪自定义源")[1].split("# 预置离线 wheel")[0]
     # DNS 自愈：始终注入备用公共 DNS（仅本构建层内生效），不依赖 getent
     assert "getent hosts" not in apt_step
     assert "223.5.5.5" in apt_step and "119.29.29.29" in apt_step
@@ -375,7 +371,7 @@ def test_dockerfile_network_fallback_resilience():
     assert "daemon.json" in apt_step
     assert 'echo "[ERROR]' not in text
     # pip 步骤：同样自带 DNS 自愈（resolv.conf 改写不跨 RUN 层）+ 官方 PyPI 回退
-    pip_step = text.split("# 四个服务的")[1]
+    pip_step = text.split("# ── 上游三份依赖")[1]
     assert "getent hosts" not in pip_step
     assert "223.5.5.5" in pip_step
     assert "https://pypi.org/simple" in pip_step
@@ -386,7 +382,7 @@ def test_dockerignore_whitelist_build_context():
     code_lines = [ln for ln in text.splitlines() if ln.strip() and not ln.lstrip().startswith("#")]
     # 白名单模式：先忽略一切，再放行四个服务目录与 container/
     assert code_lines[0] == "*"
-    for keep in ("!musicdl-service/", "!musicbox-service/", "!qqmusic-service/",
+    for keep in ("!musicbox-service/", "!qqmusic-service/",
                  "!lxmusic-service/", "!webui-service/", "!container/"):
         assert keep in code_lines
 
@@ -427,7 +423,7 @@ def test_dockerfile_copies_proxy_modules_imported_by_services():
     # proxy/app.py 按部署形态动态导入公共歌单模块；正则扫描静态 import 不容易覆盖。
     required = {"publicplaylists"}
     origins: dict[str, str] = {"publicplaylists": "动态导入（proxy/app.py）"}
-    for service_dir in ("musicdl-service", "musicbox-service", "qqmusic-service",
+    for service_dir in ("musicbox-service", "qqmusic-service",
                         "lxmusic-service", "webui-service"):
         for py in sorted((REPO_ROOT / service_dir).glob("*.py")):
             # 测试文件（test_*/conftest）不进镜像、不随服务运行：其跨目录 import

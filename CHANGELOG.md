@@ -5,6 +5,33 @@
 
 ## [Unreleased]
 
+## [2.13.0] - 2026-10-29
+
+### 新增
+
+- **QQ 音乐支持 Cookie 登录**：扫码之外的第二条路。在电脑浏览器登录 music.qq.com 后，
+  从开发者工具 Network 里复制整条 Cookie 粘进管理页即可，只需要其中的 `uin` 与
+  `qm_keyst`（或 `qqmusic_key`）。登录后按账号权益拿 320k / 无损，登录态与扫码一致地
+  持久化在 `sources-data/qqmusic/credential.json`。
+- **QQ 音乐「接入歌单与推荐」开关**（`FNMUSIC_QQMUSIC_PLAYLISTS_ENABLED`，默认关闭）：
+  开启后音乐页「热门推荐」会注入 QQ 榜单歌单（流行指数榜 / 热歌榜 / 新歌榜按日轮换），
+  关闭时 QQ 只做搜索与单曲播放。开关变更会立即失效当日推荐缓存，不必等到第二天。
+
+### 修复
+
+- **升级后管理页仍是旧版**：容器里的服务代码来自镜像烘焙的 `/srv/*`，而 `VERSION` 与
+  `.env` 来自 bind mount 的 `/repo`。镜像一旦被复用，就会出现「版本号是新的、页面和接口
+  还是旧的」——音乐源页显示已删除的音源卡片、新入口缺失，硬刷新也无效。
+  现在容器启动时先把 `/repo` 里的服务代码同步进 `/srv`，运行的永远是安装目录那一份。
+- 静态资源 URL 带 `?v=<VERSION>`：版本号一变 URL 即变，浏览器与飞牛桌面 WebView
+  不会再沿用升级前的缓存。
+
+### 变更
+
+- 彻底清除 musicdl 音源的残余：运行时代码、安装脚本、打包与 CI、测试、文档、
+  `.dockerignore` 全部对齐三音源（musicbox / qqmusic / lxmusic）。
+  `CHANGELOG` 里保留历史条目作为变更记录。
+
 ### 修复
 
 - **升级后管理页仍是旧版**：静态资源（`theme-boot.js` / `style.css` / `app.js`）的 URL 不带版本号，

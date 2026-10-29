@@ -1,7 +1,6 @@
 .venv*/
 .venv-proxy/
 .venv-research/
-.venv-musicdl/
 .venv-musicbox/
 .venv-sources/
 .lxserver/
@@ -10,7 +9,6 @@ musicbox-data/
 sources-data/
 cache/
 backup/
-musicdl_outputs/
 recommend_cache/
 public_playlists_cache/
 play_history/

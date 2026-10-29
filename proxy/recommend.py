@@ -1209,6 +1209,59 @@ def resolve_source_candidates(
     return out
 
 
+QQ_TOPLIST_ROTATION = (4, 26, 27)  # 流行指数榜 / 热歌榜 / 新歌榜，按日轮换
+
+
+def _qq_chart_index_for_day(day: str) -> int:
+    """榜单按日轮换，避免每天同一张榜（与网易榜单同思路）。"""
+    slot = sum(ord(ch) for ch in (day or "")) % len(QQ_TOPLIST_ROTATION)
+    return QQ_TOPLIST_ROTATION[slot]
+
+
+async def fetch_qq_charts(client: httpx.AsyncClient, limit: int, day: str) -> list[dict]:
+    """QQ 音乐榜单曲目，映射成与 musicbox 对齐的候选行。
+
+    id 统一改写成 ``qqmusic:<mid>``：QQ 的取链接口认 mid 不认数字 id，
+    而 guid 直接由 id 拼出，这里不对齐就会拿到一首歌的"另一首歌"。
+    服务不可达 / 未登录 / 上游报错一律返回 []，由下一级榜单补齐。
+    """
+    index = _qq_chart_index_for_day(day)
+    try:
+        r = await client.get(
+            "/api/v1/toplist", params={"index": index, "limit": limit}, timeout=15.0)
+        if r.status_code != 200:
+            logger.debug("qqmusic toplist http %s", r.status_code)
+            return []
+        data = r.json()
+    except Exception as e:  # noqa: BLE001
+        logger.debug("qqmusic toplist failed: %s", e)
+        return []
+    if not (isinstance(data, dict) and data.get("ok") is True):
+        logger.debug("qqmusic toplist not ok: %.120s", data)
+        return []
+    rows = data.get("data")
+    if not isinstance(rows, list):
+        return []
+    out: list[dict] = []
+    for it in rows:
+        if not isinstance(it, dict):
+            continue
+        sid = str(it.get("song_id") or it.get("song_mid") or "").strip()
+        if not sid:
+            continue
+        try:
+            duration_s = float(it.get("duration") or 0)
+        except (TypeError, ValueError):
+            duration_s = 0.0
+        out.append({
+            **it,
+            "id": f"qqmusic:{sid}",
+            "source": "qqmusic",
+            "duration_s": duration_s,
+        })
+    return out
+
+
 async def fetch_musicbox_recommend(
     client: httpx.AsyncClient, path: str, params: dict
 ) -> list[dict]:
@@ -1292,7 +1345,6 @@ def _match_score(item: dict, title: str, artist: str) -> int:
 
 async def _search_keyword(
     keyword: str,
-    musicdl_client: httpx.AsyncClient | None,
     musicbox_client: httpx.AsyncClient | None,
     netease_enabled: bool,
     lx_client: httpx.AsyncClient | None = None,
@@ -1339,26 +1391,6 @@ async def _search_keyword(
             logger.debug("musicbox recommend search failed: %s", e)
             return []
 
-    async def _mdl() -> list[dict]:
-        if not musicdl_client:
-            return []
-        try:
-            r = await musicdl_client.get(
-                "/search",
-                params={"keyword": keyword, "limit": 5},
-                timeout=8.0,
-            )
-            if r.status_code != 200:
-                return []
-            data = r.json()
-            rows = data.get("items") if isinstance(data, dict) else None
-            if not isinstance(rows, list):
-                return []
-            return [x for x in rows if isinstance(x, dict)]
-        except Exception as e:
-            logger.debug("musicdl recommend search failed: %s", e)
-            return []
-
     async def _lx() -> list[dict]:
         if not (lx_enabled and lx_client):
             return []
@@ -1399,7 +1431,7 @@ async def _search_keyword(
             logger.debug("lxmusic recommend search failed: %s", e)
             return []
 
-    jobs = [asyncio.create_task(coro) for coro in (_mb(), _mdl(), _lx())]
+    jobs = [asyncio.create_task(coro) for coro in (_mb(), _lx())]
     try:
         for fut in asyncio.as_completed(jobs):
             try:
@@ -1417,7 +1449,6 @@ async def _search_keyword(
 
 async def verify_track_playable(
     track: dict,
-    musicdl_client: httpx.AsyncClient | None,
     musicbox_client: httpx.AsyncClient | None,
     lx_client: httpx.AsyncClient | None,
 ) -> bool:
@@ -1427,7 +1458,6 @@ async def verify_track_playable(
       standard 档，实际播放仍走完整音质阶梯与降档）
     - lx：lxmusic /api/v1/track/url 解析直链；服务端解析成功即已含 Range
       探活（900s 探活缓存复用，后续正式播放反而更快）
-    - musicdl：/stream Range 首 KB 头部探活（200/206 且非文本/JSON）
     任何源校验异常一律按"不可播"处理——推荐宁缺毋滥，播放失败自动跳歌的
     体验远差于列表少几首。
     """
@@ -1463,22 +1493,7 @@ async def verify_track_playable(
             body = r.json()
             data = body.get("data") if isinstance(body, dict) else None
             return bool(isinstance(data, dict) and data.get("url"))
-        # musicdl 聚合引擎（migu/kuwo/...）：id 可能含冒号，取第 3 段之后的整体
-        if musicdl_client is None:
-            return True
-        r = await musicdl_client.send(
-            musicdl_client.build_request(
-                "GET", "/stream",
-                params={"id": ":".join(parts[2:]), "proxy": "true"},
-                headers={"Range": "bytes=0-1023", "Accept-Encoding": "identity"},
-            ),
-            stream=True,
-        )
-        try:
-            ctype = r.headers.get("content-type", "").lower()
-            return r.status_code in (200, 206) and "text/" not in ctype and "json" not in ctype
-        finally:
-            await r.aclose()
+        return True
     except Exception as e:
         logger.debug("verify playable failed for %s: %s", guid, e)
         return False
@@ -1486,7 +1501,6 @@ async def verify_track_playable(
 
 async def resolve_recommendations(
     recs: list[dict],
-    musicdl_client: httpx.AsyncClient | None,
     musicbox_client: httpx.AsyncClient | None,
     netease_enabled: bool,
     build_track,
@@ -1528,7 +1542,7 @@ async def resolve_recommendations(
             if interval > 0:
                 await asyncio.sleep(interval)
             items = await _search_keyword(
-                keyword, musicdl_client, musicbox_client, netease_enabled,
+                keyword, musicbox_client, netease_enabled,
                 lx_client=lx_client, lx_enabled=lx_enabled, lx_sources=lx_sources,
             )
         if not items and artist:
@@ -1536,7 +1550,7 @@ async def resolve_recommendations(
                 if interval > 0:
                     await asyncio.sleep(interval)
                 items = await _search_keyword(
-                    artist, musicdl_client, musicbox_client, netease_enabled,
+                    artist, musicbox_client, netease_enabled,
                     lx_client=lx_client, lx_enabled=lx_enabled, lx_sources=lx_sources,
                 )
         if not items:
@@ -1559,7 +1573,7 @@ async def resolve_recommendations(
             if _excluded(tg, tt, ta):
                 continue
             if verify and not await verify_track_playable(
-                track, musicdl_client, musicbox_client, lx_client,
+                track, musicbox_client, lx_client,
             ):
                 continue
             if rec.get("genre") and isinstance(track.get("genres"), list) and not track["genres"]:
@@ -1925,7 +1939,6 @@ def empty_daily_bundle(user_guid: str, kind: str = "daily") -> dict:
 
 async def get_or_build_daily(
     user_guid: str,
-    musicdl_client: httpx.AsyncClient | None,
     musicbox_client: httpx.AsyncClient | None,
     llm_http: httpx.AsyncClient | None,
     build_track,
@@ -1935,6 +1948,9 @@ async def get_or_build_daily(
     lx_client: httpx.AsyncClient | None = None,
     lx_enabled: bool = False,
     lx_sources: "list[str] | None" = None,
+    qq_client: httpx.AsyncClient | None = None,
+    qqmusic_enabled: bool = False,
+    qqmusic_playlists: bool = False,
     recommend_hot: bool = True,
     recommend_daily: bool = True,
     kind: str = "daily",
@@ -2050,6 +2066,18 @@ async def get_or_build_daily(
         return resolve_source_candidates(
             day_shifted(items, day, "lx-charts"), build_track, PLAYLIST_SIZE, exclude_guids, exclude_ta)
 
+    async def from_qq_charts(on_track=None, should_stop=None) -> list[dict]:
+        # 受「接入歌单与推荐」开关（FNMUSIC_QQMUSIC_PLAYLISTS_ENABLED）门控：
+        # 关闭时 QQ 只做搜索与单曲播放，不往音乐页注入榜单歌单。
+        if not (qqmusic_playlists and qqmusic_enabled and qq_client):
+            return []
+        items = await fetch_qq_charts(qq_client, CHART_FETCH_COUNT, day)
+        if not items:
+            return []
+        return resolve_source_candidates(
+            day_shifted(items, day, "qq-charts"), build_track, PLAYLIST_SIZE,
+            exclude_guids, exclude_ta)
+
     async def from_llm(on_track=None, should_stop=None) -> list[dict]:
         # 配置了 FNMUSIC_LLM_* 即作为每日推荐来源：音源名额已被占用（或音源
         # 不支持每日推荐）的用户走这一层，种子按用户（本地+在线历史+收藏）
@@ -2061,7 +2089,7 @@ async def get_or_build_daily(
         if not recs or not current():
             return []
         return await resolve_recommendations(
-            recs, musicdl_client, musicbox_client, netease_enabled, build_track,
+            recs, musicbox_client, netease_enabled, build_track,
             PLAYLIST_SIZE, exclude_guids, exclude_ta,
             lx_client=lx_client, lx_enabled=lx_enabled, lx_sources=lx_sources,
             on_track=on_track, should_stop=should_stop,
@@ -2214,6 +2242,7 @@ async def get_or_build_daily(
     # FNMUSIC_RECOMMEND_DAILY / FNMUSIC_RECOMMEND_HOT 分别门控两条链的构建。
     if kind == "hot":
         await run_tier("netease-charts", from_netease_charts)
+        await run_tier("qq-charts", from_qq_charts)
         await run_tier("lx-charts", from_lx_charts)
     elif recommend_daily:
         if not source_slot_claimed(day):

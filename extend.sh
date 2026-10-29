@@ -15,7 +15,6 @@ FNMUSIC_VERSION="$(head -n 1 "${BASE_DIR}/VERSION" 2>/dev/null | tr -d '[:space:
 FNMUSIC_VERSION="${FNMUSIC_VERSION:-0.0.0}"
 TARGET_SOCK="/var/run/trim_music.socket"
 UPSTREAM_SOCK="/var/run/trim_music_upstream.socket"
-MUSICDL_URL="http://127.0.0.1:8768"
 MUSICBOX_URL="http://127.0.0.1:8770"
 QQMUSIC_URL="http://127.0.0.1:8775"
 LX_URL="http://127.0.0.1:8772"
@@ -145,18 +144,13 @@ set +a
 # 不用 read：文件末尾没有换行时 read 返回 1，set -e 会在打出任何日志前静默退出。
 FNMUSIC_VERSION="$(head -n 1 "${BASE_DIR}/VERSION" 2>/dev/null | tr -d '[:space:]' || true)"
 FNMUSIC_VERSION="${FNMUSIC_VERSION:-0.0.0}"
-MUSICDL_URL="${FNMUSIC_MUSICDL_URL:-${MUSICDL_URL}}"
 MUSICBOX_URL="${FNMUSIC_MUSICBOX_URL:-${MUSICBOX_URL}}"
 QQMUSIC_URL="${FNMUSIC_QQMUSIC_URL:-${QQMUSIC_URL}}"
 LX_URL="${FNMUSIC_LX_URL:-${LX_URL}}"
-ENABLE_MUSICDL=0
 ENABLE_MUSICBOX=0
 ENABLE_QQMUSIC=0
 ENABLE_LX=0
 ENABLE_WEBUI=0
-# musicdl 音源已在 2.12.0 移除：恒为禁用，忽略 .env 中旧版本遗留的 true，
-# 否则会去等一个已不存在的服务（wait_source 90s 后 exit 1 导致安装失败）。
-ENABLE_MUSICDL=0
 is_enabled "${FNMUSIC_NETEASE_ENABLED:-true}" && ENABLE_MUSICBOX=1
 is_enabled "${FNMUSIC_QQMUSIC_ENABLED:-false}" && ENABLE_QQMUSIC=1
 is_enabled "${FNMUSIC_LX_ENABLED:-false}" && ENABLE_LX=1
@@ -217,35 +211,8 @@ rollback() {
 # ------------------------------------------------------------------------------
 # 验收测试函数
 # ------------------------------------------------------------------------------
-warn_unregistered_mdl_platforms() {
-    # 所选 musicdl 平台不在服务注册表时告警（musicdl 库版本差异可能不含个别平台），不阻断
-    [ "${ENABLE_MUSICDL}" -eq 1 ] || return 0
-    local raw="${FNMUSIC_ONLINE_SOURCES:-}"
-    [ -n "${raw}" ] || return 0
-    local body unknown
-    body="$(curl -s --max-time 5 "${MUSICDL_URL}/sources" 2>/dev/null || true)"
-    [ -n "${body}" ] || return 0
-    unknown="$(python3 - "${raw}" "${body}" <<'PY' 2>/dev/null || true
-import json, sys
-raw, body = sys.argv[1], sys.argv[2]
-try:
-    registered = {str(x).strip().lower().removesuffix("musicclient")
-                  for x in json.loads(body).get("registered", [])}
-except Exception:
-    sys.exit(0)
-unknown = [s for s in (x.strip() for x in raw.split(",")) if s
-           and s.lower().removesuffix("musicclient") not in registered]
-if unknown:
-    print(",".join(unknown))
-PY
-)" || true
-    [ -n "${unknown}" ] && log_warn "musicdl 平台 [${unknown}] 不在服务注册表中（musicdl 库版本差异），相关平台搜索将返回空。"
-    return 0
-}
-
 verify_acceptance() {
     log_info "==> 执行链路与功能验收..."
-    warn_unregistered_mdl_platforms
 
     local GW_HTTP_PORT GW_HTTPS_PORT
     read -r GW_HTTP_PORT GW_HTTPS_PORT <<< "$(get_fnos_gateway_ports)"
@@ -313,19 +280,7 @@ verify_acceptance() {
         local source="$1" keyword="$2" encoded
         encoded="$(python3 -c "import urllib.parse,sys;print(urllib.parse.quote(sys.argv[1]))" "${keyword}" 2>/dev/null || true)"
         [ -z "${encoded}" ] && return 0
-        if [ "${source}" = "musicdl" ]; then
-            # 按用户选择的 musicdl 平台白名单探测（FNMUSIC_ONLINE_SOURCES，空=服务默认白名单）
-            local mdl_sources_q=""
-            [ -n "${FNMUSIC_ONLINE_SOURCES:-}" ] && mdl_sources_q="&sources=${FNMUSIC_ONLINE_SOURCES}"
-            curl -s --max-time 20 "${MUSICDL_URL}/search?keyword=${encoded}&limit=3${mdl_sources_q}" 2>/dev/null | python3 -c "import sys,json
-try:
-    d=json.load(sys.stdin)
-    for it in (d.get('items') or [])[:3]:
-        i=it.get('id')
-        if i: print(i)
-except Exception:
-    pass" 2>/dev/null || true
-        elif [ "${source}" = "lxmusic" ]; then
+        if [ "${source}" = "lxmusic" ]; then
             # 只轮询用户选择的 lx 平台（LX_SOURCES；未配置时默认 kg/wy/mg/kw 并补充 tx 探测），
             # 避免单一子源故障导致候选题库全灭
             local lx_sub
@@ -361,7 +316,6 @@ except Exception:
     }
 
     local sources=()
-    [ "${ENABLE_MUSICDL}" -eq 1 ] && sources+=("musicdl")
     [ "${ENABLE_MUSICBOX}" -eq 1 ] && sources+=("musicbox")
     [ "${ENABLE_QQMUSIC}" -eq 1 ] && sources+=("qqmusic")
     [ "${ENABLE_LX}" -eq 1 ] && sources+=("lxmusic")
@@ -448,7 +402,7 @@ find "${BASE_DIR}/sources-data" -type d -exec chmod 0700 {} + 2>/dev/null || tru
 find "${BASE_DIR}/sources-data" -type f -exec chmod 0600 {} + 2>/dev/null || true
 
 # 旧 v1.x 部署形态清理：宿主机三 unit + 三容器（释放端口 8768/8770/8772 给单容器）
-for unit in fnmusic-musicdl fnmusic-musicbox fnmusic-qqmusic fnmusic-lxmusic; do
+for unit in fnmusic-musicbox fnmusic-qqmusic fnmusic-lxmusic; do
     stop_owned_source_unit "${unit}" || exit 1
     remove_owned_container "${unit}" || exit 1
 done
@@ -459,7 +413,6 @@ source_healthy() {
 
 # 任一应启程序未就绪即视为需要拉起/重启容器（.env 改开关后 extend 会重启容器重选进程集）
 need_start=0
-if [ "${ENABLE_MUSICDL}" -eq 1 ] && ! source_healthy "${MUSICDL_URL}"; then need_start=1; fi
 if [ "${ENABLE_MUSICBOX}" -eq 1 ] && ! source_healthy "${MUSICBOX_URL}"; then need_start=1; fi
 if [ "${ENABLE_QQMUSIC}" -eq 1 ] && ! source_healthy "${QQMUSIC_URL}"; then need_start=1; fi
 if [ "${ENABLE_LX}" -eq 1 ] && ! source_healthy "${LX_URL}"; then need_start=1; fi
@@ -562,9 +515,6 @@ if [ "${ENABLE_MUSICBOX}" -eq 1 ]; then
 fi
 if [ "${ENABLE_QQMUSIC}" -eq 1 ]; then
     wait_source "qqmusic" "${QQMUSIC_URL}" || exit 1
-fi
-if [ "${ENABLE_MUSICDL}" -eq 1 ]; then
-    wait_source "musicdl" "${MUSICDL_URL}" 90 || exit 1
 fi
 if [ "${ENABLE_LX}" -eq 1 ]; then
     wait_source "lxmusic" "${LX_URL}" || exit 1

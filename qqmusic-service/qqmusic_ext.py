@@ -665,6 +665,89 @@ async def logout() -> None:
     reset_client("logout")
 
 
+# ------------------------------------------------------------------ Cookie 登录
+# 扫码之外的第二条路：直接粘贴浏览器里的 music.qq.com Cookie。
+# 真正必需的只有 uin（QQ 号）与 qm_keyst / qqmusic_key（登录票据）；
+# access_token / refresh_token 缺失只会失去自动续期能力，不影响当下取流。
+
+# Cookie 登录没有 refresh_token，票据真实有效期由服务端决定。这里给一个保守的
+# keyExpiresIn 只为让 is_expired() 不误判——否则每次请求都会触发一次注定失败的
+# 刷新，白白拖慢取链。
+_COOKIE_KEY_TTL_S = 30 * 24 * 3600
+
+
+def parse_cookie(raw: str) -> dict[str, str]:
+    """把浏览器里复制出来的 Cookie 串解析成键值表。"""
+    jar: dict[str, str] = {}
+    text = (raw or "").replace("\r", "").replace("\n", ";")
+    if text.lstrip().lower().startswith("cookie:"):
+        text = text.lstrip()[7:]  # 兼容整行 "Cookie: xxx" 粘贴
+    for part in text.split(";"):
+        if "=" not in part:
+            continue
+        key, value = part.split("=", 1)
+        key = key.strip()
+        if not key:
+            continue
+        jar[key] = value.strip().strip('"').strip("'")
+    return jar
+
+
+def credential_from_cookie(raw: str) -> Any:
+    """Cookie → 库的 Credential；字段不足时抛 ValueError。"""
+    _, Credential, _, _, _, _ = _import_api()
+    jar = parse_cookie(raw)
+    uin = ""
+    for key in ("uin", "p_uin", "wxuin", "str_musicid", "musicid"):
+        value = jar.get(key, "").strip()
+        if value:
+            uin = value
+            break
+    if uin[:1] in ("o", "O") and uin[1:].isdigit():
+        uin = uin[1:]  # 微信侧 uin 形如 o0123456789，去掉前缀才是 QQMusicID
+    musickey = ""
+    for key in ("qm_keyst", "qqmusic_key", "musickey"):
+        value = jar.get(key, "").strip()
+        if value:
+            musickey = value
+            break
+    if not uin or not musickey:
+        raise ValueError(
+            "Cookie 里没找到 uin / qm_keyst（或 qqmusic_key），"
+            "请在浏览器打开 music.qq.com 后复制完整 Cookie")
+    if not (uin.isdigit() and int(uin) > 0):
+        raise ValueError(f"Cookie 里的 uin 不是有效 QQ 号: {uin}")
+    musicid = int(uin)
+    return Credential.model_validate({
+        "musicid": musicid,
+        # o0123456789 去掉前缀后是 0123456789，前导零是补齐用的，必须归一，
+        # 否则请求里带出去的 QQMusicID 与 musicid 不一致
+        "str_musicid": str(musicid),
+        "musickey": musickey,
+        "musickeyCreateTime": int(time.time()),
+        "keyExpiresIn": _COOKIE_KEY_TTL_S,
+        # 库的 model_validator 也会按 W_X 前缀推断，这里显式给出更稳妥
+        "loginType": 1 if musickey.startswith("W_X") else 2,
+    })
+
+
+async def login_with_cookie(raw: str) -> dict[str, Any]:
+    """用 Cookie 登录：套到 Client 上、发一次真实请求校验、凭证落盘。"""
+    credential = credential_from_cookie(raw)
+    client = await get_client()
+    client.credential = credential
+    # get_vip_info 必须带登录态，用它验证票据是否真能用（顺带拿到 SVIP 状态）
+    try:
+        resp = await client.user.get_vip_info()
+    except Exception as exc:  # noqa: BLE001
+        reset_client("cookie login rejected")
+        raise ValueError(f"Cookie 校验失败（票据无效或已过期）：{exc}") from exc
+    save_credential(credential)
+    info = await auth_status()
+    info["svip"] = bool(getattr(resp, "svip", 0)) or bool(info.get("svip"))
+    return info
+
+
 async def refresh_if_needed() -> bool:
     """凭证过期时尝试刷新；返回刷新后是否仍可用。"""
     if not is_logged_in():

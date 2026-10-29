@@ -1,0 +1,8 @@
+*
+!qqmusic-service/
+!webui-service/
+!container/
+**/__pycache__/
+**/*.md
+**/test_*.py
+**/docs/

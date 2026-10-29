@@ -26,12 +26,14 @@ def isolated(tmp_path, monkeypatch):
         monkeypatch.setitem(p.CONF, key, str(tmp_path / key))
     monkeypatch.setitem(p.CONF, "music_db", str(tmp_path / "missing.db"))
     monkeypatch.setitem(p.CONF, "search_debounce_s", 0.0)
+    # 本文件逐次断言上游调用数：关掉深分页预取，避免后台翻页干扰计数
+    monkeypatch.setitem(p.CONF, "search_deep_page", False)
     # 本文件验证"续传关闭（旧契约）"下的行为：无分离下载器、中断不留 part。
     # 切歌续传（handoff）的新行为由 test_official_bind.py 覆盖。
     monkeypatch.setitem(p.CONF, "tee_handoff_max", 0)
-    for key in ("musicdl_enabled", "netease_enabled", "lx_enabled"):
+    for key in ("qqmusic_enabled", "netease_enabled", "lx_enabled"):
         monkeypatch.setitem(p.CONF, key, True)
-    for attr in ("upstream_client", "musicdl_client", "musicbox_client", "lx_client"):
+    for attr in ("upstream_client", "qqmusic_client", "musicbox_client", "lx_client"):
         monkeypatch.setattr(p.app.state, attr, None, raising=False)
     yield
     p.reset_source_search_gates()
@@ -60,7 +62,7 @@ def session(req, items):
 async def test_livez_never_constructs_dependency_clients(monkeypatch):
     def forbidden(*args):
         pytest.fail("liveness must not touch dependencies")
-    for name in ("get_upstream_client", "get_musicdl_client", "get_musicbox_client",
+    for name in ("get_upstream_client", "get_musicbox_client",
                  "get_qqmusic_client", "get_lx_client"):
         monkeypatch.setattr(p, name, forbidden)
     assert await p.ext_livez() == {"ok": True, "service": "fnmusic-ext", "pid": os.getpid()}
@@ -75,7 +77,7 @@ async def test_health_concurrent_wall_clock_budget(monkeypatch):
     clients = []
     # 健康检查只对启用音源探测：显式打开 QQ 音乐，纳入并发预算（与其他音源同口径）
     monkeypatch.setitem(p.CONF, "qqmusic_enabled", True)
-    for getter in ("get_upstream_client", "get_musicdl_client", "get_musicbox_client",
+    for getter in ("get_upstream_client", "get_musicbox_client",
                    "get_qqmusic_client", "get_lx_client"):
         client = httpx.AsyncClient(transport=httpx.MockTransport(stalled), base_url="http://test")
         clients.append(client)
@@ -84,7 +86,7 @@ async def test_health_concurrent_wall_clock_budget(monkeypatch):
     result = await p.ext_healthz(request())
     elapsed = time.monotonic() - before
     assert 2.3 < elapsed < 2.65
-    assert len(started) == 5 and max(started) - min(started) < .1
+    assert len(started) == 4 and max(started) - min(started) < .1
     assert not result["ok"] and result["degraded"]
     assert all(x["error"] == "TimeoutError" for x in result["details"].values())
     for client in clients:
@@ -93,22 +95,23 @@ async def test_health_concurrent_wall_clock_budget(monkeypatch):
 
 @pytest.mark.anyio
 async def test_health_one_source_suffices_but_reports_degradation(monkeypatch):
-    for getter, status, payload in [("get_upstream_client", 401, {}), ("get_musicdl_client", 200, {"ok": True}),
+    monkeypatch.setitem(p.CONF, "qqmusic_enabled", True)
+    for getter, status, payload in [("get_upstream_client", 401, {}), ("get_qqmusic_client", 200, {"ok": True}),
                                   ("get_musicbox_client", 200, {"ok": False, "reason": "offline"})]:
         client = httpx.AsyncClient(transport=httpx.MockTransport(lambda req, s=status, d=payload: httpx.Response(s, json=d)), base_url="http://test")
         monkeypatch.setattr(p, getter, lambda app, c=client: c)
     monkeypatch.setitem(p.CONF, "lx_enabled", False)
     result = await p.ext_healthz(request())
     assert result["ok"] and result["degraded"]
-    assert result["musicbox"] == "fail" and result["lxmusic"] == "disabled"
+    assert result["musicbox"] == "fail" and result["qqmusic"] == "ok" and result["lxmusic"] == "disabled"
     assert result["details"]["musicbox"]["dependency"]["reason"] == "offline"
 
 
-@pytest.mark.parametrize("initial, second_prefix", [(1, "[music box] "), (3, "[dl] ")])
+@pytest.mark.parametrize("initial, second_prefix", [(1, "[music box] "), (3, "[QQ] ")])
 def test_online_window_local_first_layout_and_local_duplicates(initial, second_prefix, monkeypatch):
     """本地优先全局布局：在线条目在 items 上连续分页、不重不漏；本地重复由 merge 过滤。"""
     monkeypatch.setitem(p.CONF, "online_limit", 3)
-    raw = [song(f"kuwo:{i}", str(i)) for i in range(initial)] + [song(f"netease:{i}", str(i)) for i in range(5)]
+    raw = [song(f"qqmusic:{i}", str(i)) for i in range(initial)] + [song(f"netease:{i}", str(i)) for i in range(5)]
     entry = session(request(), p.deduplicate_online_items(raw))
     items = [x["title"] for x in entry["items"]]
     # local_total=0（上游无本地条目）：翻页走完整个在线段（dedup 后同名条目已合并）
@@ -144,7 +147,7 @@ def test_online_window_local_pages_have_no_online_items():
 
 
 def test_strict_identity_alternatives_and_scope(monkeypatch):
-    original = song("kuwo:1")
+    original = song("qqmusic:1")
     variants = [song("netease:1"), song("lx:kg:1", duration=230), song("lx:kg:2", title="Song (Live)"),
                 song("lx:kg:3", version="remix"), song("lx:kg:4", duration=0)]
     merged = p.deduplicate_online_items([original] + variants)
@@ -164,6 +167,8 @@ async def test_search_timeout_returns_local_and_drops_late_online(monkeypatch):
     """到点还没有在线结果就放弃这次搜索，晚到的歌曲不能再写进缓存。"""
     monkeypatch.setitem(p.CONF, "search_timeout", 0.08)
     monkeypatch.setitem(p.CONF, "search_debounce_s", 0.0)
+    # 本文件逐次断言上游调用数：关掉深分页预取，避免后台翻页干扰计数
+    monkeypatch.setitem(p.CONF, "search_deep_page", False)
     monkeypatch.setitem(p.CONF, "netease_enabled", False)
     monkeypatch.setitem(p.CONF, "lx_enabled", False)
 
@@ -176,9 +181,9 @@ async def test_search_timeout_returns_local_and_drops_late_online(monkeypatch):
         except asyncio.CancelledError:
             cancelled.set()
             await release.wait()
-        return {"items": [song("kuwo:1")]}
+        return {"items": [song("qqmusic:1")]}
 
-    monkeypatch.setattr(p, "fetch_musicdl_search", slow)
+    monkeypatch.setattr(p, "fetch_qqmusic_search", slow)
     p.app.state.upstream_client = httpx.AsyncClient(transport=httpx.MockTransport(
         lambda r: httpx.Response(200, json={"code": 0, "data": {"list": [{"guid": "local:1", "title": "本地"}], "total": 1}})),
         base_url="http://test")
@@ -195,47 +200,7 @@ async def test_search_timeout_returns_local_and_drops_late_online(monkeypatch):
         release.set()
     await asyncio.wait_for(asyncio.gather(entry["task"], return_exceptions=True), 2)
     assert entry["items"] == []
-    assert not any(item.get("id") == "kuwo:1" for item in entry["items"])
-
-
-@pytest.mark.anyio
-async def test_all_sources_failed_empty_not_cached_and_retried(monkeypatch):
-    """全源失败（source busy/熔断）交回的 0 条不进缓存：同词重搜立即重新聚合拿到在线结果。"""
-    monkeypatch.setitem(p.CONF, "search_timeout", 1.0)
-    monkeypatch.setitem(p.CONF, "netease_enabled", False)
-    monkeypatch.setitem(p.CONF, "lx_enabled", False)
-
-    calls = {"n": 0}
-
-    async def flaky(*args, **kwargs):
-        calls["n"] += 1
-        if calls["n"] == 1:
-            return {"ok": True, "items": [], "errors": {
-                "KuwoMusicClient": "source busy (previous search still running); retry later",
-                "MiguMusicClient": "circuit breaker open"}}
-        return {"ok": True, "items": [song("kuwo:1")]}
-
-    monkeypatch.setattr(p, "fetch_musicdl_search", flaky)
-    p.app.state.upstream_client = httpx.AsyncClient(transport=httpx.MockTransport(
-        lambda r: httpx.Response(200, json={"code": 0, "data": {"list": [{"guid": "local:1", "title": "本地"}], "total": 1}})),
-        base_url="http://test")
-
-    import json
-    body = json.loads((await p.search_track(request("q=Song"))).body)
-    assert [item["guid"] for item in body["data"]["list"]] == ["local:1"]
-    entry = next(iter(p._SEARCH_CACHE.values()))
-    await asyncio.wait({entry["task"]})
-    assert entry["items"] == []
-    assert entry["ts"] == 0
-
-    body2 = json.loads((await p.search_track(request("q=Song"))).body)
-    guids = [item["guid"] for item in body2["data"]["list"]]
-    assert fake_official_guid("online:kuwo:1") in guids
-    assert calls["n"] == 2
-    for e in p._SEARCH_CACHE.values():
-        task = e.get("task")
-        if task:
-            await asyncio.wait({task})
+    assert not any(item.get("id") == "qqmusic:1" for item in entry["items"])
 
 
 @pytest.mark.anyio
@@ -243,6 +208,8 @@ async def test_all_sources_failed_empty_not_cached_and_retried(monkeypatch):
 async def test_empty_or_error_first_completion_still_waits_for_song(monkeypatch, fast_result):
     monkeypatch.setitem(p.CONF, "search_timeout", 1.0)
     monkeypatch.setitem(p.CONF, "search_debounce_s", 0.0)
+    # 本文件逐次断言上游调用数：关掉深分页预取，避免后台翻页干扰计数
+    monkeypatch.setitem(p.CONF, "search_deep_page", False)
     # 旧的 3 秒 + 5 秒不再截断这次等待。
     monkeypatch.setitem(p.CONF, "netease_wait_s", .01)
     monkeypatch.setitem(p.CONF, "late_page_wait_s", .05)
@@ -252,13 +219,13 @@ async def test_empty_or_error_first_completion_still_waits_for_song(monkeypatch,
         return fast_result
     async def available(*args):
         await asyncio.sleep(.06)
-        return {"items": [song("kuwo:1")]}
+        return {"items": [song("qqmusic:1")]}
     monkeypatch.setattr(p, "fetch_musicbox_search", fast)
-    monkeypatch.setattr(p, "fetch_musicdl_search", available)
+    monkeypatch.setattr(p, "fetch_qqmusic_search", available)
     p.app.state.upstream_client = httpx.AsyncClient(transport=httpx.MockTransport(lambda r: httpx.Response(200, json={"code": 0, "data": {"list": [], "total": 0}})), base_url="http://test")
     response = await p.search_track(request("q=Song"))
     import json
-    assert json.loads(response.body)["data"]["list"][0]["guid"] == fake_official_guid("online:kuwo:1")
+    assert json.loads(response.body)["data"]["list"][0]["guid"] == fake_official_guid("online:qqmusic:1")
     for entry in p._SEARCH_CACHE.values():
         await entry["task"]
 
@@ -282,7 +249,7 @@ class Audio(httpx.AsyncByteStream):
 @pytest.mark.anyio
 async def test_unknown_length_error_never_finalizes(tmp_path):
     audio = Audio(fail=True)
-    response = p.stream_tee_response(httpx.Response(200, stream=audio), "online:kuwo:1", None, pre_info=song("kuwo:1"))
+    response = p.stream_tee_response(httpx.Response(200, stream=audio), "online:kuwo:1", None, pre_info=song("qqmusic:1"))
     with pytest.raises(httpx.ReadError):
         async for _ in response.body_iterator:
             pass
@@ -296,7 +263,7 @@ async def test_mid_stream_abort_is_logged(tmp_path, caplog):
     audio = Audio(fail=True)
     response = p.stream_tee_response(
         httpx.Response(200, stream=audio, headers={"content-length": "4096"}),
-        "online:kuwo:1", None, pre_info=song("kuwo:1"))
+        "online:kuwo:1", None, pre_info=song("qqmusic:1"))
     with caplog.at_level(logging.INFO, logger=p.logger.name):
         with pytest.raises(httpx.ReadError):
             async for _ in response.body_iterator:
@@ -314,7 +281,7 @@ async def test_stream_delivery_completion_and_disconnect_are_logged(tmp_path, ca
     audio = Audio()
     response = p.stream_tee_response(
         httpx.Response(200, stream=audio, headers={"content-length": "4096"}),
-        "online:kuwo:2", None, pre_info=song("kuwo:2"))
+        "online:kuwo:2", None, pre_info=song("qqmusic:2"))
     with caplog.at_level(logging.INFO, logger=p.logger.name):
         chunks = [chunk async for chunk in response.body_iterator]
     assert chunks == [b"x" * 2048, b"y" * 2048]
@@ -362,7 +329,7 @@ async def test_tee_disk_write_failure_keeps_streaming(tmp_path, caplog, monkeypa
     audio = Audio()
     response = p.stream_tee_response(
         httpx.Response(200, stream=audio, headers={"content-length": "4096"}),
-        "online:kuwo:9", None, pre_info=song("kuwo:9"))
+        "online:kuwo:9", None, pre_info=song("qqmusic:9"))
     with caplog.at_level(logging.WARNING, logger=p.logger.name):
         chunks = [chunk async for chunk in response.body_iterator]
     # 客户端字节流完整：上游是好的，播放不为落库买单
@@ -388,7 +355,7 @@ async def test_tee_part_open_failure_keeps_streaming(tmp_path, caplog, monkeypat
     audio = Audio()
     response = p.stream_tee_response(
         httpx.Response(200, stream=audio, headers={"content-length": "4096"}),
-        "online:kuwo:10", None, pre_info=song("kuwo:10"))
+        "online:kuwo:10", None, pre_info=song("qqmusic:10"))
     with caplog.at_level(logging.WARNING, logger=p.logger.name):
         chunks = [chunk async for chunk in response.body_iterator]
     assert chunks == [b"x" * 2048, b"y" * 2048]
@@ -411,14 +378,14 @@ async def test_disconnect_closes_stream_without_detached_downloader(tmp_path):
 
 @pytest.mark.anyio
 async def test_prebyte_fallback_and_no_splicing(monkeypatch):
-    req = request("guid=online:kuwo:1")
-    items = p.deduplicate_online_items([song("kuwo:1"), song("netease:2")])
+    req = request("guid=online:qqmusic:1")
+    items = p.deduplicate_online_items([song("qqmusic:1"), song("netease:2")])
     session(req, items)
     attempts = []
     streams = []
     async def opened(req, guid, rang, force_mp3=False, fresh_url=False, refresh=False):
         attempts.append(guid)
-        if guid == "online:kuwo:1":
+        if guid == "online:qqmusic:1":
             raise httpx.ReadError("before first byte")
         audio = Audio(fail=True)
         streams.append(audio)
@@ -430,7 +397,8 @@ async def test_prebyte_fallback_and_no_splicing(monkeypatch):
         return False
     monkeypatch.setattr(p, "_recover_source", no_recovery)
     response = await p.stream_track(req)
-    assert attempts == ["online:kuwo:1", "online:netease:2"]
+    # 首候选（qqmusic）本轮失败后同源重试一轮，再跨到备选源
+    assert attempts == ["online:qqmusic:1", "online:qqmusic:1", "online:netease:2"]
     assert response.status_code == 307
     assert response.headers["location"].startswith("/")  # never absolute
     assert streams[0].closed  # prevalidation connection is not orphaned
@@ -445,7 +413,7 @@ async def test_prebyte_fallback_and_no_splicing(monkeypatch):
     assert await anext(response.body_iterator) == b"x" * 2048
     with pytest.raises(httpx.ReadError):
         await anext(response.body_iterator)
-    assert attempts == ["online:kuwo:1", "online:netease:2", "online:netease:2"]
+    assert attempts == ["online:qqmusic:1", "online:qqmusic:1", "online:netease:2", "online:netease:2"]
 
 
 @pytest.mark.anyio
@@ -456,15 +424,15 @@ async def test_fallback_redirect_survives_relayed_https_client(monkeypatch):
     # 307 must stay relative: an absolute Location would downgrade the client
     # to http://<domain>/... which no listener serves on that path.
     req = Request({"type": "http", "method": "GET", "path": "/music/api/v1/track/stream",
-                   "query_string": b"guid=online:kuwo:1",
+                   "query_string": b"guid=online:qqmusic:1",
                    "headers": [(b"authorization", b"a"), (b"host", b"relay.example.com"),
                                (b"x-forwarded-proto", b"https")],
                    "app": p.app, "scheme": "http", "server": ("relay.example.com", 443)})
-    items = p.deduplicate_online_items([song("kuwo:1"), song("netease:2")])
+    items = p.deduplicate_online_items([song("qqmusic:1"), song("netease:2")])
     session(req, items)
 
     async def opened(req, guid, rang, force_mp3=False, fresh_url=False, refresh=False):
-        if guid == "online:kuwo:1":
+        if guid == "online:qqmusic:1":
             raise httpx.ReadError("before first byte")
         audio = Audio()
         resp = httpx.Response(200, stream=audio)
@@ -491,8 +459,8 @@ async def test_fallback_redirect_survives_relayed_https_client(monkeypatch):
 
 @pytest.mark.anyio
 async def test_disabled_alternative_and_seek_never_cross_sources(monkeypatch):
-    req = request("guid=online:kuwo:1")
-    session(req, p.deduplicate_online_items([song("kuwo:1"), song("netease:2")]))
+    req = request("guid=online:qqmusic:1")
+    session(req, p.deduplicate_online_items([song("qqmusic:1"), song("netease:2")]))
     monkeypatch.setitem(p.CONF, "netease_enabled", False)
     attempts = []
     async def failed(req, guid, rang, force_mp3=False, fresh_url=False, refresh=False):
@@ -503,36 +471,37 @@ async def test_disabled_alternative_and_seek_never_cross_sources(monkeypatch):
     monkeypatch.setattr(p, "_open_online_stream", failed)
     monkeypatch.setattr(p, "_recover_source", no_recovery)
     assert (await p.stream_track(req)).status_code == 404
-    assert attempts == ["online:kuwo:1"]
+    # 同源两轮尝试后放弃（未启用网易，不得跨源）
+    assert attempts == ["online:qqmusic:1", "online:qqmusic:1"]
     attempts.clear()
     monkeypatch.setitem(p.CONF, "netease_enabled", True)
     req.scope["headers"].append((b"range", b"bytes=100-"))
     # Create a fresh Request to avoid cached headers.
     req = Request(req.scope)
     assert (await p.stream_track(req)).status_code == 404
-    assert attempts == ["online:kuwo:1"]
+    assert attempts == ["online:qqmusic:1", "online:qqmusic:1"]
 
 
 @pytest.mark.anyio
 async def test_metadata_recovers_backend_after_restart_once(monkeypatch):
     req = request()
-    session(req, [song("kuwo:1")])
+    session(req, [song("qqmusic:1")])
     calls = []
     restored = False
     async def fetch(req, guid, include_lyric=True):
         calls.append("info")
-        return song("kuwo:1", album="restored") if restored else None
+        return song("qqmusic:1", album="restored") if restored else None
     async def search(*args):
         nonlocal restored
         calls.append("search")
         restored = True
-        return {"items": [song("kuwo:1")]}
+        return {"items": [song("qqmusic:1")]}
     monkeypatch.setattr(p, "_fetch_online_info", fetch)
-    monkeypatch.setattr(p, "fetch_musicdl_search", search)
-    assert (await p._online_info(req, "online:kuwo:1"))["album"] == "restored"
+    monkeypatch.setattr(p, "fetch_qqmusic_search", search)
+    assert (await p._online_info(req, "online:qqmusic:1"))["album"] == "restored"
     assert calls == ["info", "search", "info"]
     restored = False
-    assert (await p._online_info(req, "online:kuwo:1"))["title"] == "Song"
+    assert (await p._online_info(req, "online:qqmusic:1"))["title"] == "Song"
     assert calls.count("search") == 1
 
 
@@ -546,13 +515,13 @@ async def test_startup_stall_is_bounded_and_closes_transport(monkeypatch):
         async def aclose(self):
             self.closed = True
     audio = Stalled()
-    p.app.state.musicdl_client = httpx.AsyncClient(transport=httpx.MockTransport(
+    p.app.state.qqmusic_client = httpx.AsyncClient(transport=httpx.MockTransport(
         lambda req: httpx.Response(200, stream=audio)), base_url="http://test")
     before = time.monotonic()
-    response = await p.stream_track(request("guid=online:kuwo:1"))
+    response = await p.stream_track(request("guid=online:qqmusic:1"))
     assert response.status_code == 404
-    # 单次解析预算 6 秒（与进程内取链+网络抖动余量对齐），stall 必须被掐断
-    assert 5.8 < time.monotonic() - before < 6.6
+    # 单轮解析预算 6 秒；qqmusic 首候选失败后同源重试一轮，总计约 12 秒
+    assert 11.8 < time.monotonic() - before < 13.2
     assert audio.closed
 
 
@@ -560,7 +529,7 @@ async def test_startup_stall_is_bounded_and_closes_transport(monkeypatch):
 async def test_clean_unknown_length_eof_finalizes(tmp_path):
     audio = Audio()
     response = p.stream_tee_response(httpx.Response(200, stream=audio, headers={"content-type": "audio/mpeg"}),
-                                    "online:kuwo:1", None, pre_info=song("kuwo:1"))
+                                    "online:kuwo:1", None, pre_info=song("qqmusic:1"))
     data = b"".join([chunk async for chunk in response.body_iterator])
     assert len(data) == 4096 and audio.closed
     cached = p.find_cache_file("online:kuwo:1")
@@ -572,10 +541,10 @@ def test_repeated_empty_page_recovers_without_replacing_prefix(monkeypatch):
     monkeypatch.setitem(p.CONF, "online_limit", 2)
     entry = session(request(), [])
     assert p._online_window(entry, 1, 2, local_total=0) == []
-    entry["items"] = [song("kuwo:1")]
-    assert p._online_window(entry, 1, 2, local_total=0)[0]["id"] == "kuwo:1"
+    entry["items"] = [song("qqmusic:1")]
+    assert p._online_window(entry, 1, 2, local_total=0)[0]["id"] == "qqmusic:1"
     entry["items"] += [song("netease:2", title="Late")]
-    assert [item["id"] for item in p._online_window(entry, 1, 2, local_total=0)] == ["kuwo:1", "netease:2"]
+    assert [item["id"] for item in p._online_window(entry, 1, 2, local_total=0)] == ["qqmusic:1", "netease:2"]
 
 
 @pytest.mark.anyio
@@ -588,9 +557,9 @@ async def test_late_priority_cannot_replace_published_first_page(monkeypatch):
         await asyncio.sleep(.07)
         return [song("netease:1"), song("netease:2", title="Late")]
     async def fast(*args):
-        return {"items": [song("kuwo:1")]}
+        return {"items": [song("qqmusic:1")]}
     monkeypatch.setattr(p, "fetch_musicbox_search", slow)
-    monkeypatch.setattr(p, "fetch_musicdl_search", fast)
+    monkeypatch.setattr(p, "fetch_qqmusic_search", fast)
     p.app.state.upstream_client = httpx.AsyncClient(transport=httpx.MockTransport(
         lambda r: httpx.Response(200, json={"code": 0, "data": {"list": [], "total": 0}})), base_url="http://test")
     import json
@@ -598,7 +567,7 @@ async def test_late_priority_cannot_replace_published_first_page(monkeypatch):
     await next(iter(p._SEARCH_CACHE.values()))["task"]
     second = json.loads((await p.search_track(request("q=Song&page=2&size=1"))).body)
     repeated = json.loads((await p.search_track(request("q=Song&page=1&size=1"))).body)
-    assert first["data"]["list"][0]["guid"] == fake_official_guid("online:kuwo:1")
+    assert first["data"]["list"][0]["guid"] == fake_official_guid("online:qqmusic:1")
     assert second["data"]["list"][0]["guid"] == fake_official_guid("online:netease:2")
     assert repeated["data"]["list"] == first["data"]["list"]
     assert next(iter(p._SEARCH_CACHE.values()))["items"][0]["_alternatives"][0]["id"] == "netease:1"
@@ -620,24 +589,45 @@ async def test_only_full_resource_206_can_finalize(content_range, length, cached
     if length:
         headers["content-length"] = length
     response = p.stream_tee_response(httpx.Response(206, stream=audio, headers=headers),
-                                    "online:kuwo:1", "bytes=0-", pre_info=song("kuwo:1"))
+                                    "online:kuwo:1", "bytes=0-", pre_info=song("qqmusic:1"))
     assert len(b"".join([chunk async for chunk in response.body_iterator])) == 4096
     assert bool(p.find_cache_file("online:kuwo:1")) == cached
     assert not list(tmp_path.rglob("*.part"))
 
 
 @pytest.mark.anyio
-async def test_gzip_audio_rejected_before_first_byte(tmp_path):
+async def test_gzip_audio_rejected_before_first_byte(tmp_path, monkeypatch):
+    """CDN 忽略 Accept-Encoding: identity 时必须拒收，不让编码字节进音频缓存。
+
+    取链走 app 注入的 qqmusic 客户端，媒体请求则由 _open_online_stream 自建
+    客户端发出，所以这里替换 httpx.AsyncClient，让自建客户端也落在 Mock 上。
+    """
     import gzip
     packed = gzip.compress(b"x" * 4096)
     seen = []
-    def handler(req):
+
+    def cdn_handler(req):
         seen.append(req.headers.get("accept-encoding"))
         return httpx.Response(200, content=packed, headers={"content-type": "audio/mpeg",
             "content-encoding": "gzip", "content-length": str(len(packed))})
-    p.app.state.musicdl_client = httpx.AsyncClient(transport=httpx.MockTransport(handler), base_url="http://test")
-    response = await p.stream_track(request("guid=online:kuwo:1"))
-    assert response.status_code == 404 and seen == ["identity"]
+
+    def resolve_handler(req):
+        return httpx.Response(200, json={"ok": True, "data": {"code": 200, "url": "http://cdn.test/x.mp3"}})
+
+    real_client = httpx.AsyncClient
+    cdn_transport = httpx.MockTransport(cdn_handler)
+
+    class MediaClient(real_client):
+        def __init__(self, *args, **kwargs):
+            kwargs.setdefault("transport", cdn_transport)
+            super().__init__(*args, **kwargs)
+
+    p.app.state.qqmusic_client = real_client(transport=httpx.MockTransport(resolve_handler), base_url="http://test")
+    monkeypatch.setattr(httpx, "AsyncClient", MediaClient)
+    response = await p.stream_track(request("guid=online:qqmusic:1"))
+    assert response.status_code == 404
+    # 同源重试一轮，两次都必须声明 identity
+    assert seen == ["identity", "identity"]
     assert not list(tmp_path.rglob("*.mp3"))
 
 
@@ -660,9 +650,10 @@ def _upstream():
 
 
 def _track(item_title):
+    """QQ 音乐上游搜索响应条目（fetch_qqmusic_search 期望的字段形态）。"""
     return {
-        "id": "kuwo:1", "source": "kuwo", "title": item_title, "artist": "Artist",
-        "duration_s": 200, "ext": "mp3",
+        "song_id": "1", "song_name": item_title, "artist": "Artist",
+        "duration": 200, "quality": "HQ", "album_pic_url": "http://img.test/1.jpg",
     }
 
 
@@ -676,8 +667,8 @@ async def _until(pred, timeout=1.0):
 
 
 @pytest.mark.anyio
-async def test_same_user_keeps_only_latest_musicdl_keyword(monkeypatch):
-    """musicdl 不能取消：中间词不发上游，先发出的结果不进缓存，最终词会发。"""
+async def test_same_user_keeps_only_latest_qqmusic_keyword(monkeypatch):
+    """qqmusic 不能取消：中间词不发上游，先发出的结果不进缓存，最终词会发。"""
     monkeypatch.setitem(p.CONF, "netease_enabled", False)
     monkeypatch.setitem(p.CONF, "lx_enabled", False)
     monkeypatch.setitem(p.CONF, "netease_wait_s", 5.0)
@@ -686,20 +677,20 @@ async def test_same_user_keeps_only_latest_musicdl_keyword(monkeypatch):
     hold = asyncio.Event()
     started = asyncio.Event()
 
-    async def musicdl(request):
+    async def qqmusic(request):
         keyword = request.url.params["keyword"]
         seen.append(keyword)
         if keyword == "k1":
             started.set()
             await hold.wait()
-        return httpx.Response(200, json={"ok": True, "items": [_track(keyword)]})
+        return httpx.Response(200, json={"ok": True, "data": [_track(keyword)]})
 
     p.app.state.upstream_client = _upstream()
-    p.app.state.musicdl_client = httpx.AsyncClient(transport=httpx.MockTransport(musicdl), base_url="http://test")
+    p.app.state.qqmusic_client = httpx.AsyncClient(transport=httpx.MockTransport(qqmusic), base_url="http://test")
     first = asyncio.create_task(p.search_track(request("q=k1", token="user")))
     await started.wait()
     second = asyncio.create_task(p.search_track(request("q=k2", token="user")))
-    await _until(lambda: second.done() or any(slot["keyword"] == "k2" for slot in p._MUSICDL_SEARCH_GATE._queue))
+    await _until(lambda: second.done() or any(slot["keyword"] == "k2" for slot in p._QQMUSIC_SEARCH_GATE._queue))
     third = asyncio.create_task(p.search_track(request("q=k3", token="user")))
     await second
     assert _titles(second.result()) == []
@@ -717,7 +708,7 @@ async def test_same_user_keeps_only_latest_musicdl_keyword(monkeypatch):
 @pytest.mark.anyio
 async def test_lx_new_keyword_cancels_previous_request(monkeypatch):
     monkeypatch.setitem(p.CONF, "netease_enabled", False)
-    monkeypatch.setitem(p.CONF, "musicdl_enabled", False)
+    monkeypatch.setitem(p.CONF, "qqmusic_enabled", False)
     monkeypatch.setitem(p.CONF, "netease_wait_s", 5.0)
     monkeypatch.setitem(p.CONF, "late_page_wait_s", 5.0)
     seen = []
@@ -766,16 +757,16 @@ async def test_other_user_keeps_result_and_waits(monkeypatch):
     started = asyncio.Event()
     release = asyncio.Event()
 
-    async def musicdl(request):
+    async def qqmusic(request):
         keyword = request.url.params["keyword"]
         seen.append(keyword)
         if keyword == "from-a":
             started.set()
             await release.wait()
-        return httpx.Response(200, json={"ok": True, "items": [_track(keyword)]})
+        return httpx.Response(200, json={"ok": True, "data": [_track(keyword)]})
 
     p.app.state.upstream_client = _upstream()
-    p.app.state.musicdl_client = httpx.AsyncClient(transport=httpx.MockTransport(musicdl), base_url="http://test")
+    p.app.state.qqmusic_client = httpx.AsyncClient(transport=httpx.MockTransport(qqmusic), base_url="http://test")
     first = asyncio.create_task(p.search_track(request("q=from-a", token="alice")))
     await started.wait()
     second = asyncio.create_task(p.search_track(request("q=from-b", token="bob")))
@@ -799,14 +790,14 @@ async def test_same_keyword_next_page_joins_inflight_search(monkeypatch):
     started = asyncio.Event()
     release = asyncio.Event()
 
-    async def musicdl(request):
+    async def qqmusic(request):
         seen.append(request.url.params["keyword"])
         started.set()
         await release.wait()
-        return httpx.Response(200, json={"ok": True, "items": [_track("song")]})
+        return httpx.Response(200, json={"ok": True, "data": [_track("song")]})
 
     p.app.state.upstream_client = _upstream()
-    p.app.state.musicdl_client = httpx.AsyncClient(transport=httpx.MockTransport(musicdl), base_url="http://test")
+    p.app.state.qqmusic_client = httpx.AsyncClient(transport=httpx.MockTransport(qqmusic), base_url="http://test")
     first = asyncio.create_task(p.search_track(request("q=song&page=1&size=20", token="user")))
     await started.wait()
     second = asyncio.create_task(p.search_track(request("q=song&page=2&size=20", token="user")))
@@ -829,13 +820,13 @@ async def test_search_waits_until_keyword_is_quiet(monkeypatch):
     seen = []
     started_at = []
 
-    async def musicdl(request):
+    async def qqmusic(request):
         seen.append(request.url.params["keyword"])
         started_at.append(time.monotonic())
-        return httpx.Response(200, json={"ok": True, "items": [_track(request.url.params["keyword"])]})
+        return httpx.Response(200, json={"ok": True, "data": [_track(request.url.params["keyword"])]})
 
     p.app.state.upstream_client = _upstream()
-    p.app.state.musicdl_client = httpx.AsyncClient(transport=httpx.MockTransport(musicdl), base_url="http://test")
+    p.app.state.qqmusic_client = httpx.AsyncClient(transport=httpx.MockTransport(qqmusic), base_url="http://test")
     origin = time.monotonic()
     first = asyncio.create_task(p.search_track(request("q=k1", token="user")))
     await asyncio.sleep(0.05)
@@ -875,15 +866,15 @@ async def test_timeout_retry_is_new_round_before_old_cleanup(monkeypatch, throug
             except asyncio.CancelledError:
                 cancelled.set()
                 await cleanup.wait()
-                return {"items": [song("kuwo:old", "old")]}
-        return {"items": [song("kuwo:new", "new")]}
+                return {"items": [song("qqmusic:old", "old")]}
+        return {"items": [song("qqmusic:new", "new")]}
 
     if through_gate:
         async def gated_fetch(*args):
-            return await p._MUSICDL_SEARCH_GATE.run(p._FETCH_SCOPE.get(), args[1], lambda: fetch(*args))
-        monkeypatch.setattr(p, "fetch_musicdl_search", gated_fetch)
+            return await p._QQMUSIC_SEARCH_GATE.run(p._FETCH_SCOPE.get(), args[1], lambda: fetch(*args))
+        monkeypatch.setattr(p, "fetch_qqmusic_search", gated_fetch)
     else:
-        monkeypatch.setattr(p, "fetch_musicdl_search", fetch)
+        monkeypatch.setattr(p, "fetch_qqmusic_search", fetch)
     p.app.state.upstream_client = _upstream()
     try:
         first = await asyncio.wait_for(p.search_track(request("q=Song")), .3)
@@ -916,12 +907,12 @@ async def test_expired_round_does_not_inherit_old_items(monkeypatch):
     monkeypatch.setitem(p.CONF, "search_deep_page", False)
     p.app.state.upstream_client = _upstream()
     async def fetch(*args):
-        return {"items": [song("kuwo:new", "new")]}
-    monkeypatch.setattr(p, "fetch_musicdl_search", fetch)
+        return {"items": [song("qqmusic:new", "new")]}
+    monkeypatch.setattr(p, "fetch_qqmusic_search", fetch)
     await p.search_track(request("q=Song"))
     old = next(iter(p._SEARCH_CACHE.values()))
     await old["task"]
-    old.update(ts=0, items=[song("kuwo:stale", "stale")], deep_round=7, exhausted={"lx"})
+    old.update(ts=0, items=[song("qqmusic:stale", "stale")], deep_round=7, exhausted={"lx"})
     response = await p.search_track(request("q=Song"))
     assert _titles(response) == ["new"]
     assert next(iter(p._SEARCH_CACHE.values())) is not old
@@ -939,8 +930,8 @@ async def test_cancel_one_same_keyword_waiter_keeps_shared_aggregate(monkeypatch
         calls.append(1)
         started.set()
         await release.wait()
-        return {"items": [song("kuwo:shared")]}
-    monkeypatch.setattr(p, "fetch_musicdl_search", fetch)
+        return {"items": [song("qqmusic:shared")]}
+    monkeypatch.setattr(p, "fetch_qqmusic_search", fetch)
     first = asyncio.create_task(p.search_track(request("q=Song")))
     await started.wait()
     second = asyncio.create_task(p.search_track(request("q=Song")))
@@ -956,7 +947,7 @@ async def test_cancel_one_same_keyword_waiter_keeps_shared_aggregate(monkeypatch
 
 
 @pytest.mark.anyio
-async def test_musicdl_gate_orphan_retry_does_not_join_old_job():
+async def test_qqmusic_gate_orphan_retry_does_not_join_old_job():
     gate = p.SourceSearchGate(cancellable=False)
     started, cancelled, cleanup = asyncio.Event(), asyncio.Event(), asyncio.Event()
     async def old_fetch():

@@ -1,6 +1,5 @@
 """「源+平台」粒度选择：lx 平台白名单过滤 / fetch_lx_search sources 透传 /
-lx 榜单平台交集 / CONF 读取 LX_SOURCES。musicdl 平台白名单机制此前已存在，
-此处仅回归其对新短名格式白名单的兼容。"""
+lx 榜单平台交集 / CONF 读取 LX_SOURCES。"""
 import os
 import subprocess
 import sys
@@ -41,18 +40,6 @@ def test_source_enabled_lx_platform_filter(monkeypatch):
     # 源级开关仍然优先
     monkeypatch.setitem(CONF, "lx_enabled", False)
     assert _source_enabled("online:lx:kw:ABC") is False
-
-
-def test_source_enabled_musicdl_short_name_whitelist(monkeypatch):
-    """install.sh 新写入的短名白名单与旧全名格式行为一致。"""
-    monkeypatch.setitem(CONF, "musicdl_enabled", True)
-    monkeypatch.setitem(CONF, "online_sources", "kuwo,gequhai")
-    assert _source_enabled("online:kuwo:1") is True
-    assert _source_enabled("online:gequhai:1") is True
-    assert _source_enabled("online:qq:1") is False
-    monkeypatch.setitem(CONF, "online_sources", "KuwoMusicClient")
-    assert _source_enabled("online:kuwo:1") is True
-    assert _source_enabled("online:migu:1") is False
 
 
 # ---------------------------------------------------------------- 透传 --

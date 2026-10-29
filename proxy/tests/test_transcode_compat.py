@@ -139,7 +139,7 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setitem(CONF, "plt_dir", dirs["playlist_tracks"])
     monkeypatch.setitem(CONF, "tee_save_dir", dirs["library"])
     monkeypatch.setitem(CONF, "music_db", str(tmp_path / "music.db"))
-    monkeypatch.setitem(CONF, "musicdl_enabled", True)
+    monkeypatch.setitem(CONF, "qqmusic_enabled", True)
     monkeypatch.setitem(CONF, "netease_enabled", True)
     monkeypatch.setitem(CONF, "lx_enabled", False)
     monkeypatch.setitem(CONF, "tee_save_enabled", False)
@@ -147,7 +147,7 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setitem(CONF, "lyric_field", "data.lyric")
     monkeypatch.setitem(CONF, "search_list_path", "data.list")
     monkeypatch.setitem(CONF, "online_limit", 30)
-    monkeypatch.setitem(CONF, "musicdl_url", "http://127.0.0.1:8768")
+    monkeypatch.setitem(CONF, "qqmusic_url", "http://127.0.0.1:8775")
     monkeypatch.setitem(CONF, "transcode_enabled", True)
     monkeypatch.setitem(CONF, "transcode_bitrate", "128k")
     monkeypatch.setitem(CONF, "transcode_hls_time", 10.0)
@@ -181,17 +181,16 @@ def env(tmp_path, monkeypatch):
     app.state.upstream_client = httpx.AsyncClient(
         transport=httpx.MockTransport(upstream_handler), base_url="http://unix")
 
-    def musicdl_handler(request: httpx.Request) -> httpx.Response:
-        if request.url.path == "/info":
-            return httpx.Response(200, json={
-                "ok": True, "id": "kuwo:228908", "source": "kuwo",
-                "title": "晴天", "artist": "周杰伦", "album": "叶惠美",
-                "duration_s": 269, "ext": "mp3",
-            })
+    def qqmusic_handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/info"):
+            return httpx.Response(200, json={"ok": True, "data": {
+                "song_name": "晴天", "artist": "周杰伦", "album_name": "叶惠美",
+                "duration": 269, "album_pic_url": "",
+            }})
         return httpx.Response(404)
 
-    app.state.musicdl_client = httpx.AsyncClient(
-        transport=httpx.MockTransport(musicdl_handler), base_url="http://127.0.0.1:8768")
+    app.state.qqmusic_client = httpx.AsyncClient(
+        transport=httpx.MockTransport(qqmusic_handler), base_url="http://127.0.0.1:8775")
     app.state.musicbox_client = httpx.AsyncClient(
         transport=httpx.MockTransport(lambda r: httpx.Response(404, json={"ok": False})),
         base_url="http://127.0.0.1:8770")
@@ -743,7 +742,7 @@ def test_download_dl_quality_standard_missing_quality_transcodes(monkeypatch, en
 
 def test_download_fails_when_source_dead_and_no_cache(env, fake_ffmpeg):
     fake_ffmpeg("ok")
-    guid = "online:migu:600902000006889366"   # musicdl mock 只答 /info，流 404
+    guid = "online:qqmusic:600902000006889366"   # mock 只答 /info，取链 404
     with TestClient(app) as client:
         did = client.post("/music/api/v1/download/track/transcode/prepare",
                           json={"guid": guid}).json()["data"]["downloadId"]
@@ -1029,43 +1028,6 @@ def test_tee_finalize_accepts_lossless_when_decode_ok(env, fake_ffmpeg, monkeypa
     assert meta is not None and os.path.isfile(meta["dest"])
 
 
-def test_open_stream_blacklisted_guid_requests_mp3(env):
-    """拉黑曲目的取流请求带 quality=mp3（且续传请求不切档）。"""
-    appmod._LOSSLESS_BAD.clear()
-    captured = {}
-
-    class _FakeClient:
-        def build_request(self, method, url, params=None, headers=None):
-            captured["params"] = params
-            resp = httpx.Response(200, stream=_Whole(b"ID3xyz"),
-                                  headers={"content-length": "6",
-                                           "content-type": "audio/mpeg"})
-            return resp
-
-        async def send(self, req, stream=False):
-            import io
-            return httpx.Response(200, stream=_Whole(b"ID3xyz"),
-                                  headers={"content-length": "6",
-                                           "content-type": "audio/mpeg"})
-
-    class _FakeApp:
-        state = type("S", (), {"musicdl_client": _FakeClient()})()
-
-    def _fake_get(app):
-        return _FakeClient()
-
-    monkeypatch = pytest.MonkeyPatch()
-    monkeypatch.setattr(appmod, "get_musicdl_client", _fake_get)
-    appmod._lossless_blacklist("online:kuwo:99005")
-
-    async def _run():
-        req = appmod.Request({"type": "http", "headers": [], "app": _FakeApp()})
-        return await appmod._open_online_stream(req, "online:kuwo:99005", None)
-
-    opened = asyncio.run(_run())
-    assert captured["params"].get("quality") == "mp3"
-    assert opened is not None and opened[2] == "mp3"     # content-type 修正扩展名
-    monkeypatch.undo()
 
 
 def test_open_stream_blacklisted_guid_lx_requests_high_mp3(env, monkeypatch):
@@ -1113,7 +1075,7 @@ def test_open_stream_blacklisted_guid_lx_requests_high_mp3(env, monkeypatch):
     assert recorded_requests[0].get("quality") == "high"
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_corrupt_stream_tee_retries_only_after_writer_released(env, monkeypatch):
     guid = "online:kuwo:99009"
     monkeypatch.setitem(CONF, "tee_save_enabled", True)
@@ -1135,7 +1097,7 @@ async def test_corrupt_stream_tee_retries_only_after_writer_released(env, monkey
     assert registrations == [(guid, False, "tee_save_enabled")]
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_netease_downgrade_octet_stream_does_not_read_lx_resolution(env, monkeypatch):
     guid = "online:netease:99010"
     monkeypatch.setattr(appmod, "_retained_track", lambda *a: ({"ext": "flac"}, None))
@@ -1179,7 +1141,7 @@ progress=end
     assert reason == "ok"
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 @pytest.mark.parametrize("decoded_time, keep_flac", [
     ("00:03:41.200000", True),
     ("00:00:12.000000", False),

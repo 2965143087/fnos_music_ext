@@ -1,0 +1,2 @@
+ensure-image
+wait http://127.0.0.1:8770/healthz 60 2

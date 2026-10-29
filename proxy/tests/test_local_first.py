@@ -26,7 +26,7 @@ import proxy.localmatch as localmatch
 from proxy import transcode as tc
 from proxy.app import CONF, app
 
-GUID_KUWO = "online:kuwo:228908"
+GUID_QQMUSIC = "online:qqmusic:228908"
 GUID_WY = "online:netease:99123"
 ONLINE_MP3 = b"ID3ONLINEMPDATAX" * 64
 
@@ -139,7 +139,7 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setitem(CONF, "fav_dir", dirs["favorites"])
     monkeypatch.setitem(CONF, "tee_save_dir", dirs["library"])
     monkeypatch.setitem(CONF, "music_db", os.path.join(dirs["db"], "music.db"))
-    monkeypatch.setitem(CONF, "musicdl_enabled", True)
+    monkeypatch.setitem(CONF, "qqmusic_enabled", True)
     monkeypatch.setitem(CONF, "netease_enabled", True)
     monkeypatch.setitem(CONF, "lx_enabled", False)
     monkeypatch.setitem(CONF, "tee_save_enabled", False)
@@ -150,32 +150,48 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setitem(CONF, "transcode_max_sessions", 2)
     monkeypatch.setitem(CONF, "transcode_ttl_s", 90.0)
     monkeypatch.setitem(CONF, "transcode_cache_max_mb", 512)
-    monkeypatch.setitem(CONF, "musicdl_url", "http://127.0.0.1:8768")
+    monkeypatch.setitem(CONF, "qqmusic_url", "http://127.0.0.1:8775")
     monkeypatch.setenv("FNMUSIC_RECOMMEND_DIR", dirs["recommend"])
     monkeypatch.setenv("FNMUSIC_PLAY_HISTORY_DIR", dirs["history"])
     monkeypatch.setenv("FNMUSIC_PUBLIC_PLAYLISTS_DIR", str(tmp_path / "public"))
     monkeypatch.setattr(appmod, "_HOME", str(tmp_path))
 
-    state = {"musicdl": [], "musicbox": []}
+    state = {"online": [], "musicbox": []}
 
-    def musicdl_handler(request: httpx.Request) -> httpx.Response:
-        state["musicdl"].append({"path": request.url.path,
-                                 "range": request.headers.get("range")})
-        if request.url.path == "/info":
-            return httpx.Response(200, json={
-                "ok": True, "id": "kuwo:228908", "source": "kuwo",
-                "title": "晴天", "artist": "周杰伦", "album": "叶惠美",
-                "duration_s": 269, "ext": "mp3", "lyric": ""})
-        if request.url.path == "/stream":
-            return httpx.Response(200, content=ONLINE_MP3,
-                                  headers={"Content-Type": "audio/mpeg"})
+    def qqmusic_handler(request: httpx.Request) -> httpx.Response:
+        state["online"].append({"path": request.url.path,
+                                "range": request.headers.get("range")})
+        if request.url.path.endswith("/info"):
+            return httpx.Response(200, json={"ok": True, "data": {
+                "song_name": "晴天", "artist": "周杰伦", "album_name": "叶惠美",
+                "duration": 269, "album_pic_url": ""}})
+        if request.url.path.endswith("/url"):
+            return httpx.Response(200, json={"ok": True, "data": {
+                "code": 200, "url": "http://cdn.test/stream", "quality": "standard"}})
         return httpx.Response(404)
+
+    # 媒体字节由 _open_online_stream 自建客户端拉取：注入 MockTransport 并同样记账
+    def media_handler(request: httpx.Request) -> httpx.Response:
+        state["online"].append({"path": request.url.path,
+                                "range": request.headers.get("range")})
+        return httpx.Response(200, content=ONLINE_MP3,
+                              headers={"Content-Type": "audio/mpeg"})
+
+    media_transport = httpx.MockTransport(media_handler)
+    real_async_client = httpx.AsyncClient
+
+    def patched_async_client(*args, **kwargs):
+        if "transport" not in kwargs:
+            kwargs["transport"] = media_transport
+        return real_async_client(*args, **kwargs)
+
+    monkeypatch.setattr(httpx, "AsyncClient", patched_async_client)
 
     app.state.upstream_client = httpx.AsyncClient(
         transport=httpx.MockTransport(lambda r: httpx.Response(200, json={"code": 0})),
         base_url="http://unix")
-    app.state.musicdl_client = httpx.AsyncClient(
-        transport=httpx.MockTransport(musicdl_handler), base_url="http://127.0.0.1:8768")
+    app.state.qqmusic_client = httpx.AsyncClient(
+        transport=httpx.MockTransport(qqmusic_handler), base_url="http://127.0.0.1:8775")
     app.state.musicbox_client = httpx.AsyncClient(
         transport=httpx.MockTransport(
             lambda r: (state["musicbox"].append({"path": r.url.path}),
@@ -225,31 +241,31 @@ def _write_recommend_cache(env, guid, title="晴天", artist="周杰伦", album=
 def test_daily_recommend_first_play_hits_local_without_online(env):
     """每日推荐 guid 首播即命中本地：无收藏/历史/.ref 依赖，在线请求次数为零。"""
     _, wav_bytes = _seed_library_song(env)
-    _write_recommend_cache(env, GUID_KUWO)
+    _write_recommend_cache(env, GUID_QQMUSIC)
     with TestClient(app) as client:
-        resp = client.get(f"/music/api/v1/track/stream?guid={GUID_KUWO}")
+        resp = client.get(f"/music/api/v1/track/stream?guid={GUID_QQMUSIC}")
     assert resp.status_code == 200
     assert resp.content == wav_bytes
     assert resp.headers["content-type"].startswith("audio/wav")
     assert resp.headers["content-length"] == str(len(wav_bytes))
-    assert env["musicdl"] == [] and env["musicbox"] == []
+    assert env["online"] == [] and env["musicbox"] == []
 
 
 def test_local_hit_survives_restart_via_disk_needle(env):
     """重启后（内存会话/LRU/匹配缓存全空）靠磁盘缓存仍命中本地。"""
     _, wav_bytes = _seed_library_song(env)
-    _write_recommend_cache(env, GUID_KUWO)
+    _write_recommend_cache(env, GUID_QQMUSIC)
     with TestClient(app) as client:
-        first = client.get(f"/music/api/v1/track/stream?guid={GUID_KUWO}")
+        first = client.get(f"/music/api/v1/track/stream?guid={GUID_QQMUSIC}")
     assert first.status_code == 200 and first.content == wav_bytes
     # 模拟重启：清空进程内全部状态，只剩磁盘缓存与曲库
     for store in (appmod._SEARCH_CACHE, appmod._ONLINE_META):
         store.clear()
     localmatch.reset_caches()
     with TestClient(app) as client:
-        second = client.get(f"/music/api/v1/track/stream?guid={GUID_KUWO}")
+        second = client.get(f"/music/api/v1/track/stream?guid={GUID_QQMUSIC}")
     assert second.status_code == 200 and second.content == wav_bytes
-    assert env["musicdl"] == [] and env["musicbox"] == []
+    assert env["online"] == [] and env["musicbox"] == []
 
 
 def test_play_history_needle_and_range_head(env):
@@ -257,19 +273,19 @@ def test_play_history_needle_and_range_head(env):
     _, wav_bytes = _seed_library_song(env, seconds=3.0)
     with open(os.path.join(env["dirs"]["history"], "u1.json"), "w", encoding="utf-8") as f:
         json.dump({"items": [{
-            "guid": GUID_KUWO, "playedAt": time.time(),
-            "track": {"guid": GUID_KUWO, "title": "晴天", "artist": "周杰伦",
+            "guid": GUID_QQMUSIC, "playedAt": time.time(),
+            "track": {"guid": GUID_QQMUSIC, "title": "晴天", "artist": "周杰伦",
                       "album": "叶惠美"},
         }]}, f, ensure_ascii=False)
     with TestClient(app) as client:
-        head = client.head(f"/music/api/v1/track/stream?guid={GUID_KUWO}")
-        rng = client.get(f"/music/api/v1/track/stream?guid={GUID_KUWO}",
+        head = client.head(f"/music/api/v1/track/stream?guid={GUID_QQMUSIC}")
+        rng = client.get(f"/music/api/v1/track/stream?guid={GUID_QQMUSIC}",
                          headers={"Range": "bytes=100-"})
     assert head.status_code == 200
     assert head.headers["content-length"] == str(len(wav_bytes))
     assert rng.status_code == 206
     assert rng.content == wav_bytes[100:]
-    assert env["musicdl"] == [] and env["musicbox"] == []
+    assert env["online"] == [] and env["musicbox"] == []
 
 
 def test_metadata_uses_local_specs_and_skips_online_detail(env):
@@ -284,17 +300,17 @@ def test_metadata_uses_local_specs_and_skips_online_detail(env):
     assert data["audioSpec"]["size"] == os.path.getsize(wav_path)
     assert data["audioSpec"]["format"] == "wav"
     assert env["musicbox"] == []   # 无取链预取、无在线详情
-    assert env["musicdl"] == []
+    assert env["online"] == []
 
 
 def test_search_session_needle_hits_local(env):
     """搜索会话/已登记元数据作针（内存路径）。"""
     _, wav_bytes = _seed_library_song(env)
-    appmod.register_online_meta_one(GUID_KUWO, "晴天", "周杰伦", "叶惠美", 269)
+    appmod.register_online_meta_one(GUID_QQMUSIC, "晴天", "周杰伦", "叶惠美", 269)
     with TestClient(app) as client:
-        resp = client.get(f"/music/api/v1/track/stream?guid={GUID_KUWO}")
+        resp = client.get(f"/music/api/v1/track/stream?guid={GUID_QQMUSIC}")
     assert resp.status_code == 200 and resp.content == wav_bytes
-    assert env["musicdl"] == [] and env["musicbox"] == []
+    assert env["online"] == [] and env["musicbox"] == []
 
 
 # === 匹配规则 ===
@@ -365,7 +381,7 @@ def test_cue_and_soft_deleted_and_missing_files_never_match(env):
 def test_corrupt_audio_falls_back_online_with_fault_skip_and_recovery(env):
     """损坏音轨回退在线；5 分钟故障窗口内跳过本地；文件修复（指纹变化）恢复本地。"""
     path, _ = _seed_library_song(env, corrupt=True)
-    _write_recommend_cache(env, GUID_KUWO)
+    _write_recommend_cache(env, GUID_QQMUSIC)
     probe_calls = []
     real_probe = localmatch.probe_audio
 
@@ -374,67 +390,67 @@ def test_corrupt_audio_falls_back_online_with_fault_skip_and_recovery(env):
         return real_probe(match)
 
     with TestClient(app) as client:
-        first = client.get(f"/music/api/v1/track/stream?guid={GUID_KUWO}")
+        first = client.get(f"/music/api/v1/track/stream?guid={GUID_QQMUSIC}")
         assert first.status_code == 200 and first.content == ONLINE_MP3
-        assert [c for c in env["musicdl"] if c["path"] == "/stream"]
-        assert localmatch.fault_active(GUID_KUWO, {"path": path,
+        assert [c for c in env["online"] if c["path"] == "/stream"]
+        assert localmatch.fault_active(GUID_QQMUSIC, {"path": path,
                "size": os.path.getsize(path), "mtime": os.path.getmtime(path)})
         # 故障窗口内：不再探测本地，直接在线
         monkey_probe = localmatch.probe_audio
         localmatch.probe_audio = counting_probe
         try:
-            env["musicdl"].clear()
-            second = client.get(f"/music/api/v1/track/stream?guid={GUID_KUWO}")
+            env["online"].clear()
+            second = client.get(f"/music/api/v1/track/stream?guid={GUID_QQMUSIC}")
             assert second.status_code == 200 and second.content == ONLINE_MP3
             assert probe_calls == []   # 未再探测（fault 跳过）
         finally:
             localmatch.probe_audio = monkey_probe
         # 文件修复（大小/修改时间变化）→ 立即允许重试 → 恢复本地优先
         wav_bytes = _make_wav(path, 4.0)
-        env["musicdl"].clear()
-        third = client.get(f"/music/api/v1/track/stream?guid={GUID_KUWO}")
+        env["online"].clear()
+        third = client.get(f"/music/api/v1/track/stream?guid={GUID_QQMUSIC}")
     assert third.status_code == 200 and third.content == wav_bytes
-    assert env["musicdl"] == []
+    assert env["online"] == []
 
 
 def test_missing_file_and_db_absent_fall_back_online(env):
     """文件缺失与数据库不可用都不阻断：直接在线。"""
     _seed_library_song(env, missing=True)
-    _write_recommend_cache(env, GUID_KUWO)
+    _write_recommend_cache(env, GUID_QQMUSIC)
     with TestClient(app) as client:
-        resp = client.get(f"/music/api/v1/track/stream?guid={GUID_KUWO}")
+        resp = client.get(f"/music/api/v1/track/stream?guid={GUID_QQMUSIC}")
         assert resp.status_code == 200 and resp.content == ONLINE_MP3
         # 数据库缺失（路径不存在）
         CONF["music_db"] = os.path.join(env["tmp"], "nope", "music.db")
         localmatch.reset_caches()
-        resp2 = client.get(f"/music/api/v1/track/stream?guid={GUID_KUWO}")
+        resp2 = client.get(f"/music/api/v1/track/stream?guid={GUID_QQMUSIC}")
     assert resp2.status_code == 200 and resp2.content == ONLINE_MP3
 
 
 def test_stale_local_range_not_applied_to_online(env):
     """本地中途失败后：非零起始 Range 不套用到在线文件（重起播），bytes=0- 放行。"""
     _, wav_bytes = _seed_library_song(env)
-    _write_recommend_cache(env, GUID_KUWO)
+    _write_recommend_cache(env, GUID_QQMUSIC)
     with TestClient(app) as client:
-        first = client.get(f"/music/api/v1/track/stream?guid={GUID_KUWO}")
+        first = client.get(f"/music/api/v1/track/stream?guid={GUID_QQMUSIC}")
         assert first.status_code == 200
         # 模拟本地字节已供出后中途失败（error_hook 语义）：mark + 同指纹故障
         match = {"path": os.path.join(env["dirs"]["library"], "song.wav"),
                  "size": len(wav_bytes), "mtime": os.path.getmtime(
                      os.path.join(env["dirs"]["library"], "song.wav"))}
-        localmatch.record_fault(GUID_KUWO, match, "test mid-read")
-        env["musicdl"].clear()
-        resumed = client.get(f"/music/api/v1/track/stream?guid={GUID_KUWO}",
+        localmatch.record_fault(GUID_QQMUSIC, match, "test mid-read")
+        env["online"].clear()
+        resumed = client.get(f"/music/api/v1/track/stream?guid={GUID_QQMUSIC}",
                              headers={"Range": "bytes=100-"})
     assert resumed.status_code == 200           # 200 全量，而非带错位偏移的 206
     assert resumed.content == ONLINE_MP3
-    streamed = [c for c in env["musicdl"] if c["path"] == "/stream"]
+    streamed = [c for c in env["online"] if c["path"] == "/stream"]
     assert streamed and streamed[0]["range"] is None
     # bytes=0- 无害，原样转发在线（不带本地偏移语义）
-    assert appmod._sanitize_stale_local_range(GUID_KUWO, "bytes=0-") == "bytes=0-"
-    assert appmod._sanitize_stale_local_range(GUID_KUWO, None) is None
+    assert appmod._sanitize_stale_local_range(GUID_QQMUSIC, "bytes=0-") == "bytes=0-"
+    assert appmod._sanitize_stale_local_range(GUID_QQMUSIC, None) is None
     # Once online bytes have been served, later seeks refer to that new layout.
-    assert appmod._sanitize_stale_local_range(GUID_KUWO, "bytes=-100") == "bytes=-100"
+    assert appmod._sanitize_stale_local_range(GUID_QQMUSIC, "bytes=-100") == "bytes=-100"
 
 
 def test_serve_file_with_range_error_hook_on_truncation(tmp_path):
@@ -473,69 +489,71 @@ def _install_fake_ffmpeg(monkeypatch, tmp_path):
 def test_transcode_local_file_input_and_no_duplicate_download(env, tmp_path, monkeypatch):
     """本地命中直喂 ffmpeg（输入为本地路径）；本地会话不挂整轨下载。"""
     wav_path, _ = _seed_library_song(env)
-    _write_recommend_cache(env, GUID_KUWO)
+    _write_recommend_cache(env, GUID_QQMUSIC)
     arglog = _install_fake_ffmpeg(monkeypatch, tmp_path)
     with TestClient(app) as client:
-        post = client.post("/music/api/v1/track/transcode", json={"guid": GUID_KUWO})
+        post = client.post("/music/api/v1/track/transcode", json={"guid": GUID_QQMUSIC})
         assert post.status_code == 200
-        playlist = client.get(f"/music/api/v1/track/hls/{GUID_KUWO}/preset.m3u8")
+        playlist = client.get(f"/music/api/v1/track/hls/{GUID_QQMUSIC}/preset.m3u8")
         assert playlist.status_code == 200
         token = re.search(r'URI="([a-f0-9]{32})__init.mp4"', playlist.text)[1]
-        init = client.get(f"/music/api/v1/track/hls/{GUID_KUWO}/{token}__init.mp4")
+        init = client.get(f"/music/api/v1/track/hls/{GUID_QQMUSIC}/{token}__init.mp4")
         assert init.status_code == 200 and init.content.startswith(b"ftypinit")
-        seg = client.get(f"/music/api/v1/track/hls/{GUID_KUWO}/{token}__00000.m4s")
+        seg = client.get(f"/music/api/v1/track/hls/{GUID_QQMUSIC}/{token}__00000.m4s")
         assert seg.status_code == 200
     argv = open(arglog).read()
-    assert wav_path in argv and "127.0.0.1:8768" not in argv   # 输入是本地文件
+    assert wav_path in argv and "cdn.test" not in argv   # 输入是本地文件
     assert appmod._full_fetch_tasks == {}                      # 不触发重复整轨下载
 
 
 def test_completed_hls_rendition_stays_pinned_when_local_appears(env, tmp_path, monkeypatch):
     _install_fake_ffmpeg(monkeypatch, tmp_path)
-    directory = tc.session_dir(CONF["cache_dir"], GUID_KUWO)
+    directory = tc.session_dir(CONF["cache_dir"], GUID_QQMUSIC)
     os.makedirs(directory, exist_ok=True)
-    completed = tc.Session(GUID_KUWO, directory, 10, 10, 1, status="done")
+    completed = tc.Session(GUID_QQMUSIC, directory, 10, 10, 1, status="done")
     with open(os.path.join(directory, tc.INIT_NAME), "wb") as fp:
         fp.write(b"original-init")
     with open(os.path.join(directory, "00000.m4s"), "wb") as fp:
         fp.write(b"original-online")
     tc._write_state(completed)
     with TestClient(app) as client:
-        first = client.get(f"/music/api/v1/track/hls/{GUID_KUWO}/preset.m3u8")
+        first = client.get(f"/music/api/v1/track/hls/{GUID_QQMUSIC}/preset.m3u8")
         assert completed.rendition in first.text
-        assert tc.playback_session(GUID_KUWO) is not None
+        assert tc.playback_session(GUID_QQMUSIC) is not None
         _seed_library_song(env)
-        _write_recommend_cache(env, GUID_KUWO)
-        appmod.register_online_meta_one(GUID_KUWO, "晴天", "周杰伦", "叶惠美")
-        second = client.get(f"/music/api/v1/track/hls/{GUID_KUWO}/preset.m3u8")
+        _write_recommend_cache(env, GUID_QQMUSIC)
+        appmod.register_online_meta_one(GUID_QQMUSIC, "晴天", "周杰伦", "叶惠美")
+        second = client.get(f"/music/api/v1/track/hls/{GUID_QQMUSIC}/preset.m3u8")
         assert completed.rendition in second.text
-        segment = client.get(f"/music/api/v1/track/hls/{GUID_KUWO}/{completed.rendition}__00000.m4s")
+        segment = client.get(f"/music/api/v1/track/hls/{GUID_QQMUSIC}/{completed.rendition}__00000.m4s")
         assert segment.content == b"original-online"
-        client.post("/music/api/v1/track/transcode/quit", json={"guid": GUID_KUWO})
+        client.post("/music/api/v1/track/transcode/quit", json={"guid": GUID_QQMUSIC})
         assert not tc.playback_in_use()
-        restarted = client.get(f"/music/api/v1/track/hls/{GUID_KUWO}/preset.m3u8")
+        restarted = client.get(f"/music/api/v1/track/hls/{GUID_QQMUSIC}/preset.m3u8")
         assert completed.rendition not in restarted.text
-    assert not env["musicdl"]
+    # 已pin 的成品档位不再回源解析/取流（元数据补全不算）
+    assert not [c for c in env["online"]
+                if c["path"].endswith("/url") or c["path"] == "/stream"]
 
 
 def test_transcode_startup_failure_rebuilds_from_online(env, tmp_path, monkeypatch):
     """本地转码起播失败：清理失败会话、记故障，换在线输入重建。"""
     wav_path, _ = _seed_library_song(env)
-    _write_recommend_cache(env, GUID_KUWO)
+    _write_recommend_cache(env, GUID_QQMUSIC)
     arglog = _install_fake_ffmpeg(monkeypatch, tmp_path)
     monkeypatch.setenv("FAKE_FFMPEG_FAIL_FIRST_ATTEMPT", "1")   # 首次（本地）失败
     with TestClient(app) as client:
-        post = client.post("/music/api/v1/track/transcode", json={"guid": GUID_KUWO})
+        post = client.post("/music/api/v1/track/transcode", json={"guid": GUID_QQMUSIC})
         assert post.status_code == 200
-        playlist = client.get(f"/music/api/v1/track/hls/{GUID_KUWO}/preset.m3u8")
+        playlist = client.get(f"/music/api/v1/track/hls/{GUID_QQMUSIC}/preset.m3u8")
         assert playlist.status_code == 200
         token = re.search(r'URI="([a-f0-9]{32})__init.mp4"', playlist.text)[1]
-        seg = client.get(f"/music/api/v1/track/hls/{GUID_KUWO}/{token}__00000.m4s")
+        seg = client.get(f"/music/api/v1/track/hls/{GUID_QQMUSIC}/{token}__00000.m4s")
         assert seg.status_code == 200
     argv = open(arglog).read()
     assert wav_path in argv                      # 第一次尝试：本地输入
     assert "/stream" in argv                     # 第二次重建：在线输入
-    assert localmatch.fault_active(GUID_KUWO, {
+    assert localmatch.fault_active(GUID_QQMUSIC, {
         "path": wav_path, "size": os.path.getsize(wav_path),
         "mtime": os.path.getmtime(wav_path)})
 
@@ -543,33 +561,33 @@ def test_transcode_startup_failure_rebuilds_from_online(env, tmp_path, monkeypat
 def test_hls_segments_never_mix_audio_versions(env, tmp_path, monkeypatch):
     """本地会话中途失败后：客户端仍续拉旧序列时不供出在线版本分片；重新拉清单后恢复。"""
     song_path, _ = _seed_library_song(env)
-    _write_recommend_cache(env, GUID_KUWO)
+    _write_recommend_cache(env, GUID_QQMUSIC)
     arglog = _install_fake_ffmpeg(monkeypatch, tmp_path)
     with TestClient(app) as client:
-        playlist = client.get(f"/music/api/v1/track/hls/{GUID_KUWO}/preset.m3u8")
+        playlist = client.get(f"/music/api/v1/track/hls/{GUID_QQMUSIC}/preset.m3u8")
         assert playlist.status_code == 200
         token = re.search(r'URI="([a-f0-9]{32})__init.mp4"', playlist.text)[1]
-        seg = client.get(f"/music/api/v1/track/hls/{GUID_KUWO}/{token}__00000.m4s")
+        seg = client.get(f"/music/api/v1/track/hls/{GUID_QQMUSIC}/{token}__00000.m4s")
         assert seg.status_code == 200            # 本地版本分片已供出
         # 模拟本地会话中途死亡（watcher 清理目录）+ 记文件故障（_on_hls_segment_failure 语义）
         import shutil
-        shutil.rmtree(tc.session_dir(CONF["cache_dir"], GUID_KUWO), ignore_errors=True)
-        tc._SESSIONS.pop(GUID_KUWO, None)
-        localmatch.record_fault(GUID_KUWO, {
+        shutil.rmtree(tc.session_dir(CONF["cache_dir"], GUID_QQMUSIC), ignore_errors=True)
+        tc._SESSIONS.pop(GUID_QQMUSIC, None)
+        localmatch.record_fault(GUID_QQMUSIC, {
             "path": song_path, "size": os.path.getsize(song_path),
             "mtime": os.path.getmtime(song_path)}, "test mid-death")
         # 旧序列续拉：重建的是在线会话（版本不同）→ 分片 404，不混入另一份音频
-        retry_seg = client.get(f"/music/api/v1/track/hls/{GUID_KUWO}/{token}__00001.m4s")
+        retry_seg = client.get(f"/music/api/v1/track/hls/{GUID_QQMUSIC}/{token}__00001.m4s")
         assert retry_seg.status_code == 404
         # 新的播放过程：重新拉 playlist 固定新版本，分片恢复
-        playlist2 = client.get(f"/music/api/v1/track/hls/{GUID_KUWO}/preset.m3u8")
+        playlist2 = client.get(f"/music/api/v1/track/hls/{GUID_QQMUSIC}/preset.m3u8")
         assert playlist2.status_code == 200
         new_token = re.search(r'URI="([a-f0-9]{32})__init.mp4"', playlist2.text)[1]
         assert new_token != token
-        old = client.get(f"/music/api/v1/track/hls/{GUID_KUWO}/{token}__00001.m4s")
+        old = client.get(f"/music/api/v1/track/hls/{GUID_QQMUSIC}/{token}__00001.m4s")
         assert old.status_code == 404
         token = new_token
-        seg2 = client.get(f"/music/api/v1/track/hls/{GUID_KUWO}/{token}__00001.m4s")
+        seg2 = client.get(f"/music/api/v1/track/hls/{GUID_QQMUSIC}/{token}__00001.m4s")
         assert seg2.status_code == 200
     argv = open(arglog).read()
     assert "/stream" in argv                     # 重建输入为在线
@@ -578,11 +596,11 @@ def test_hls_segments_never_mix_audio_versions(env, tmp_path, monkeypatch):
 @pytest.mark.parametrize("origin", ["public", "account", "favorite"])
 def test_disk_origins_keep_online_identity_and_avoid_network(env, monkeypatch, origin):
     _, audio = _seed_library_song(env)
-    track = {"guid": GUID_KUWO, "title": "晴天", "artists": [{"name": "周杰伦"}],
+    track = {"guid": GUID_QQMUSIC, "title": "晴天", "artists": [{"name": "周杰伦"}],
              "album": {"name": "叶惠美"}}
     if origin == "favorite":
         path = os.path.join(env["dirs"]["favorites"], "u1.json")
-        data = {"items": [{"guid": GUID_KUWO, "track": track}]}
+        data = {"items": [{"guid": GUID_QQMUSIC, "track": track}]}
     else:
         root = os.path.join(env["tmp"], origin)
         monkeypatch.setenv("FNMUSIC_PUBLIC_PLAYLISTS_DIR" if origin == "public"
@@ -593,15 +611,15 @@ def test_disk_origins_keep_online_identity_and_avoid_network(env, monkeypatch, o
     with open(path, "w") as fp:
         json.dump(data, fp)
     with TestClient(app) as client:
-        response = client.get("/music/api/v1/track/stream", params={"guid": GUID_KUWO})
-        metadata = client.get("/music/api/v1/track/audio-info", params={"guid": GUID_KUWO})
+        response = client.get("/music/api/v1/track/stream", params={"guid": GUID_QQMUSIC})
+        metadata = client.get("/music/api/v1/track/audio-info", params={"guid": GUID_QQMUSIC})
     assert response.content == audio
     info = metadata.json()["data"]
-    assert appmod.resolve_real_guid(info["guid"]) == GUID_KUWO
+    assert appmod.resolve_real_guid(info["guid"]) == GUID_QQMUSIC
     assert info["audioSpec"]["sampleRate"] == 8000
     assert info["audioSpec"]["channel"] == 1
     assert info["audioSpec"]["bitrate"] == 128000
-    assert env["musicdl"] == env["musicbox"] == []
+    assert env["online"] == env["musicbox"] == []
 
 
 def test_all_unicode_candidates_album_priority_and_full_artist_set(env):
@@ -620,15 +638,15 @@ def test_all_unicode_candidates_album_priority_and_full_artist_set(env):
 def test_deleted_cached_hit_rechecks_db_and_missing_file(env):
     path, _ = _seed_library_song(env)
     needle = lambda: ("晴天", "周杰伦", "叶惠美")
-    assert localmatch.resolve_guid(GUID_KUWO, needle, CONF["music_db"])
+    assert localmatch.resolve_guid(GUID_QQMUSIC, needle, CONF["music_db"])
     con = sqlite3.connect(CONF["music_db"])
     con.execute("UPDATE track SET is_admin_deleted=1")
     con.commit()
     con.close()
-    assert localmatch.resolve_guid(GUID_KUWO, needle, CONF["music_db"]) is None
-    localmatch.invalidate(GUID_KUWO)
+    assert localmatch.resolve_guid(GUID_QQMUSIC, needle, CONF["music_db"]) is None
+    localmatch.invalidate(GUID_QQMUSIC)
     os.unlink(path)
-    assert localmatch.resolve_guid(GUID_KUWO, needle, CONF["music_db"]) is None
+    assert localmatch.resolve_guid(GUID_QQMUSIC, needle, CONF["music_db"]) is None
 
 
 def test_db_error_does_not_create_negative_cache(env):
@@ -636,11 +654,11 @@ def test_db_error_does_not_create_negative_cache(env):
     with open(db, "wb") as fp:
         fp.write(b"broken sqlite")
     needle = lambda: ("晴天", "周杰伦", "叶惠美")
-    assert localmatch.resolve_guid(GUID_KUWO, needle, db) is None
-    assert GUID_KUWO not in localmatch._MISSES
+    assert localmatch.resolve_guid(GUID_QQMUSIC, needle, db) is None
+    assert GUID_QQMUSIC not in localmatch._MISSES
     os.unlink(db)
     _seed_library_song(env)
-    assert localmatch.resolve_guid(GUID_KUWO, needle, db)
+    assert localmatch.resolve_guid(GUID_QQMUSIC, needle, db)
 
 
 def test_empty_unreadable_files_are_excluded(env, monkeypatch):
@@ -670,7 +688,7 @@ def test_local_response_holds_same_open_file_after_unlink(env):
     path, audio = _seed_library_song(env)
     match = localmatch.resolve_in_library(CONF["music_db"], "晴天", "周杰伦")
     async def run():
-        response = await appmod._serve_local_stream(GUID_KUWO, match, "bytes=100-200")
+        response = await appmod._serve_local_stream(GUID_QQMUSIC, match, "bytes=100-200")
         os.unlink(path)
         return b"".join([chunk async for chunk in response.body_iterator])
     assert asyncio.run(run()) == audio[100:201]
@@ -678,22 +696,22 @@ def test_local_response_holds_same_open_file_after_unlink(env):
 
 def test_corrupt_head_and_metadata_do_not_claim_local_specs(env):
     _seed_library_song(env, corrupt=True)
-    _write_recommend_cache(env, GUID_KUWO)
+    _write_recommend_cache(env, GUID_QQMUSIC)
     with TestClient(app) as client:
-        meta = client.get("/music/api/v1/track/metadata", params={"guid": GUID_KUWO})
-        head = client.head("/music/api/v1/track/stream", params={"guid": GUID_KUWO})
+        meta = client.get("/music/api/v1/track/metadata", params={"guid": GUID_QQMUSIC})
+        head = client.head("/music/api/v1/track/stream", params={"guid": GUID_QQMUSIC})
     assert meta.json()["data"]["audioSpec"]["format"] == "mp3"
     assert not head.headers.get("content-type", "").startswith("audio/wav")
 
 
 def test_no_ffmpeg_local_manifest_does_not_fetch_info(env, monkeypatch):
     _seed_library_song(env)
-    _write_recommend_cache(env, GUID_KUWO)
+    _write_recommend_cache(env, GUID_QQMUSIC)
     monkeypatch.setattr(tc, "FFMPEG_BIN", None)
     with TestClient(app) as client:
-        manifest = client.get(f"/music/api/v1/track/hls/{GUID_KUWO}/preset.m3u8")
+        manifest = client.get(f"/music/api/v1/track/hls/{GUID_QQMUSIC}/preset.m3u8")
     assert manifest.status_code == 200 and "#EXTINF:2.000" in manifest.text
-    assert env["musicdl"] == env["musicbox"] == []
+    assert env["online"] == env["musicbox"] == []
 
 
 def test_watcher_records_mid_transcode_failure_before_session_removal(env, monkeypatch):
@@ -703,17 +721,17 @@ def test_watcher_records_mid_transcode_failure_before_session_removal(env, monke
         async def wait(self):
             return 1
     async def run():
-        directory = tc.session_dir(CONF["cache_dir"], GUID_KUWO)
+        directory = tc.session_dir(CONF["cache_dir"], GUID_QQMUSIC)
         os.makedirs(directory, exist_ok=True)
-        sess = tc.Session(GUID_KUWO, directory, 20, 10, 2, src=path,
+        sess = tc.Session(GUID_QQMUSIC, directory, 20, 10, 2, src=path,
                           proc=FailedProcess(), src_kind="local", source_fingerprint=match)
-        sess.on_failure = lambda failed: appmod._on_hls_segment_failure(GUID_KUWO, failed)
-        tc._SESSIONS[GUID_KUWO] = sess
+        sess.on_failure = lambda failed: appmod._on_hls_segment_failure(GUID_QQMUSIC, failed)
+        tc._SESSIONS[GUID_QQMUSIC] = sess
         await tc._watch(sess)
-        assert tc.get_session(GUID_KUWO) is None
+        assert tc.get_session(GUID_QQMUSIC) is None
         assert sess.status == "failed"
     asyncio.run(run())
-    assert localmatch.fault_active(GUID_KUWO, match)
+    assert localmatch.fault_active(GUID_QQMUSIC, match)
 
 
 
@@ -722,23 +740,23 @@ def test_disk_multiple_artists_are_not_reduced_to_first_artist(env):
     root = appmod.pubpl.cache_dir()
     os.makedirs(root, exist_ok=True)
     with open(os.path.join(root, "duet.json"), "w") as fp:
-        json.dump({"tracks": [{"guid": GUID_KUWO, "title": "晴天", "artist": "A",
+        json.dump({"tracks": [{"guid": GUID_QQMUSIC, "title": "晴天", "artist": "A",
                    "artists": [{"name": "B"}, {"name": "A"}], "album": "叶惠美"}]}, fp)
     with TestClient(app) as client:
-        resp = client.get("/music/api/v1/track/stream", params={"guid": GUID_KUWO})
+        resp = client.get("/music/api/v1/track/stream", params={"guid": GUID_QQMUSIC})
     assert resp.content == audio
-    assert env["musicdl"] == []
+    assert env["online"] == []
 
 
 def test_miss_expiry_and_new_registration_invalidate(env, monkeypatch):
     _seed_library_song(env)
     needle = lambda: ("new song", "周杰伦", "")
-    assert localmatch.resolve_guid(GUID_KUWO, needle, CONF["music_db"]) is None
-    assert GUID_KUWO in localmatch._MISSES
-    assert localmatch._MISSES[GUID_KUWO] <= time.monotonic() + 30
-    appmod.register_online_meta_one(GUID_KUWO, "晴天", "周杰伦", "叶惠美", 2)
-    assert GUID_KUWO not in localmatch._MISSES
-    assert localmatch.resolve_guid(GUID_KUWO, lambda: ("晴天", "周杰伦", ""), CONF["music_db"])
+    assert localmatch.resolve_guid(GUID_QQMUSIC, needle, CONF["music_db"]) is None
+    assert GUID_QQMUSIC in localmatch._MISSES
+    assert localmatch._MISSES[GUID_QQMUSIC] <= time.monotonic() + 30
+    appmod.register_online_meta_one(GUID_QQMUSIC, "晴天", "周杰伦", "叶惠美", 2)
+    assert GUID_QQMUSIC not in localmatch._MISSES
+    assert localmatch.resolve_guid(GUID_QQMUSIC, lambda: ("晴天", "周杰伦", ""), CONF["music_db"])
 
 
 def test_concurrent_ensure_produces_only_one_session(env, tmp_path, monkeypatch):
@@ -747,8 +765,8 @@ def test_concurrent_ensure_produces_only_one_session(env, tmp_path, monkeypatch)
     async def run():
         kwargs = {"root": CONF["cache_dir"]}
         one, two = await asyncio.gather(
-            tc.ensure_session(GUID_KUWO, "http://test/source", 20, **kwargs),
-            tc.ensure_session(GUID_KUWO, "http://test/source", 20, **kwargs))
+            tc.ensure_session(GUID_QQMUSIC, "http://test/source", 20, **kwargs),
+            tc.ensure_session(GUID_QQMUSIC, "http://test/source", 20, **kwargs))
         assert one is two
         await one.exit_event.wait()
     asyncio.run(run())
@@ -759,24 +777,24 @@ def test_concurrent_ensure_produces_only_one_session(env, tmp_path, monkeypatch)
 
 def test_failed_local_file_cannot_return_via_legacy_ref_cache(env):
     path, _ = _seed_library_song(env, corrupt=True)
-    _write_recommend_cache(env, GUID_KUWO)
-    appmod.remember_media_path(GUID_KUWO, path)
+    _write_recommend_cache(env, GUID_QQMUSIC)
+    appmod.remember_media_path(GUID_QQMUSIC, path)
     with TestClient(app) as client:
-        resp = client.get("/music/api/v1/track/stream", params={"guid": GUID_KUWO})
+        resp = client.get("/music/api/v1/track/stream", params={"guid": GUID_QQMUSIC})
     assert resp.content == ONLINE_MP3
-    assert appmod.find_cache_file(GUID_KUWO, playback=True) != path
+    assert appmod.find_cache_file(GUID_QQMUSIC, playback=True) != path
 
 
 def test_local_library_beats_existing_complete_download(env):
     _, audio = _seed_library_song(env)
-    _write_recommend_cache(env, GUID_KUWO)
-    cached = os.path.join(CONF["cache_dir"], appmod.cache_safe_guid(GUID_KUWO) + ".mp3")
+    _write_recommend_cache(env, GUID_QQMUSIC)
+    cached = os.path.join(CONF["cache_dir"], appmod.cache_safe_guid(GUID_QQMUSIC) + ".mp3")
     with open(cached, "wb") as fp:
         fp.write(ONLINE_MP3)
     with TestClient(app) as client:
-        resp = client.get("/music/api/v1/track/stream", params={"guid": GUID_KUWO})
+        resp = client.get("/music/api/v1/track/stream", params={"guid": GUID_QQMUSIC})
     assert resp.content == audio
-    assert env["musicdl"] == []
+    assert env["online"] == []
 
 
 def test_discard_waits_watcher_before_new_directory(env, tmp_path, monkeypatch):
@@ -787,17 +805,17 @@ def test_discard_waits_watcher_before_new_directory(env, tmp_path, monkeypatch):
         def kill(self):
             self.returncode = -9
     async def run():
-        directory = tc.session_dir(CONF["cache_dir"], GUID_KUWO)
+        directory = tc.session_dir(CONF["cache_dir"], GUID_QQMUSIC)
         os.makedirs(directory, exist_ok=True)
-        sess = tc.Session(GUID_KUWO, directory, 20, 10, 2, proc=Process())
+        sess = tc.Session(GUID_QQMUSIC, directory, 20, 10, 2, proc=Process())
         async def old_cleanup():
             await asyncio.sleep(0.03)
             tc._remove_dir(directory)
             sess.exit_event.set()
         sess.watcher = asyncio.create_task(old_cleanup())
-        tc._SESSIONS[GUID_KUWO] = sess
-        await tc.discard_session(GUID_KUWO)
-        new = await tc.ensure_session(GUID_KUWO, "http://test/source", 20, root=CONF["cache_dir"])
+        tc._SESSIONS[GUID_QQMUSIC] = sess
+        await tc.discard_session(GUID_QQMUSIC)
+        new = await tc.ensure_session(GUID_QQMUSIC, "http://test/source", 20, root=CONF["cache_dir"])
         await new.exit_event.wait()
         assert os.path.isfile(os.path.join(directory, tc.INIT_NAME))
     asyncio.run(run())
@@ -821,34 +839,34 @@ def test_internal_single_space_is_part_of_title_and_artist_identity(env, title, 
 def test_registered_vo_preserves_complete_artist_set_for_local_match(env):
     _, audio = _seed_library_song(env, artists=("甲", "乙"))
     appmod.register_online_meta([{
-        "guid": GUID_KUWO, "title": "晴天", "album": "叶惠美",
+        "guid": GUID_QQMUSIC, "title": "晴天", "album": "叶惠美",
         "artists": [{"name": "甲"}, {"name": "乙"}],
     }])
     with TestClient(app) as client:
-        response = client.get("/music/api/v1/track/stream", params={"guid": GUID_KUWO})
+        response = client.get("/music/api/v1/track/stream", params={"guid": GUID_QQMUSIC})
     assert response.content == audio
-    assert not env["musicdl"]
+    assert not env["online"]
 
 
 @pytest.mark.parametrize("failure", ["soft_delete", "db_missing"])
 def test_local_layout_range_reset_when_library_becomes_unavailable(env, failure):
     _seed_library_song(env)
-    _write_recommend_cache(env, GUID_KUWO)
+    _write_recommend_cache(env, GUID_QQMUSIC)
     with TestClient(app) as client:
-        assert client.get("/music/api/v1/track/stream", params={"guid": GUID_KUWO}).status_code == 200
+        assert client.get("/music/api/v1/track/stream", params={"guid": GUID_QQMUSIC}).status_code == 200
         if failure == "soft_delete":
             with sqlite3.connect(CONF["music_db"]) as con:
                 con.execute("UPDATE track SET is_admin_deleted=1")
         else:
             os.unlink(CONF["music_db"])
-        env["musicdl"].clear()
-        response = client.get("/music/api/v1/track/stream", params={"guid": GUID_KUWO},
+        env["online"].clear()
+        response = client.get("/music/api/v1/track/stream", params={"guid": GUID_QQMUSIC},
                               headers={"Range": "bytes=100-"})
         assert response.content == ONLINE_MP3
-        assert [c for c in env["musicdl"] if c["path"] == "/stream"][0]["range"] is None
-        env["musicdl"].clear()
-        seek = client.get("/music/api/v1/track/stream", params={"guid": GUID_KUWO},
+        assert [c for c in env["online"] if c["path"] == "/stream"][0]["range"] is None
+        env["online"].clear()
+        seek = client.get("/music/api/v1/track/stream", params={"guid": GUID_QQMUSIC},
                           headers={"Range": "bytes=50-"})
         # A completed online tee may serve the seek from its cache.
         assert seek.status_code == 206 and seek.content == ONLINE_MP3[50:]
-        assert appmod._sanitize_stale_local_range(GUID_KUWO, "bytes=50-") == "bytes=50-"
+        assert appmod._sanitize_stale_local_range(GUID_QQMUSIC, "bytes=50-") == "bytes=50-"

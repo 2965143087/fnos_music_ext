@@ -61,7 +61,6 @@ SERVICE_VERSION = "2.0.0"
 
 CONF = {
     "repo_dir": os.environ.get("WEBUI_REPO_DIR", "/repo"),
-    "musicdl_url": os.environ.get("WEBUI_MUSICDL_URL", "http://127.0.0.1:8001"),
     "musicbox_url": os.environ.get("WEBUI_MUSICBOX_URL", "http://127.0.0.1:8002"),
     "qqmusic_url": os.environ.get("WEBUI_QQMUSIC_URL", "http://127.0.0.1:8006"),
     "lx_url": os.environ.get("WEBUI_LX_URL", "http://127.0.0.1:8003"),
@@ -110,6 +109,7 @@ SCHEMA: dict[str, dict] = {
     "FNMUSIC_QQMUSIC_ENABLED": {"kind": "bool", "default": "false", "group": "provider", "reload": "process", "label": "QQ 音乐"},
     "FNMUSIC_QQMUSIC_QUALITY": {"kind": "enum", "values": ["lossless", "exhigh", "standard"], "default": "lossless", "group": "qqmusic", "reload": "hot", "label": "QQ 音乐首选音质"},
     "FNMUSIC_QQMUSIC_SEARCH_LIMIT": {"kind": "int", "min": 1, "max": 100, "default": "50", "group": "qqmusic", "reload": "hot", "label": "QQ 音乐搜索条数"},
+    "FNMUSIC_QQMUSIC_PLAYLISTS_ENABLED": {"kind": "bool", "default": "false", "group": "qqmusic", "reload": "process", "label": "QQ 音乐接入歌单与推荐"},
     "FNMUSIC_LX_ENABLED": {"kind": "bool", "default": "false", "group": "provider", "reload": "process", "label": "洛雪自定义源"},
     "LX_SOURCE_URL": {"kind": "str", "default": "", "group": "lx", "reload": "process", "label": "洛雪源脚本地址（http(s) URL 或 file:// 上传地址）"},
     "LX_SOURCE_LIST": {"kind": "str", "default": "[]", "group": "lx", "reload": "hot", "label": "洛雪源列表（JSON 数组）"},
@@ -268,7 +268,7 @@ def switch_provider_process(old: str, new: str, keep_musicbox: bool = False) -> 
 
 # ------------------------------------------------------------------ 音源预览（临时拉起） --
 # WebUI 点选未启用的音源卡片时临时拉起对应进程（仅 supervisorctl，不写 .env），
-# 让 lx 测试 / musicdl 平台列表 / 网易扫码立即可用：
+# 让 lx 测试 / 网易扫码立即可用：
 # - 保存后转正（正式启用）或被立即清退（api_config 保存路径 reconcile）；
 # - 只点选未保存的，PREVIEW_TTL 秒无访问后自动停止（选平台/测试源/扫码会续期）。
 PREVIEW_TTL = 300.0
@@ -1098,7 +1098,7 @@ async def api_status(request: Request):
     provider = current_provider(values)
     processes = supervisor_status()
     services: dict[str, dict] = {}
-    for name, base in (("musicdl", CONF["musicdl_url"]), ("musicbox", CONF["musicbox_url"]),
+    for name, base in (("musicbox", CONF["musicbox_url"]),
                        ("qqmusic", CONF["qqmusic_url"]), ("lxmusic", CONF["lx_url"])):
         if name in PROVIDERS and name != provider:
             if name == "musicbox" and _resident_flag(values):
@@ -1121,7 +1121,7 @@ async def api_status(request: Request):
         "deploy_mode": values.get("FNMUSIC_DEPLOY_MODE", "docker"),
         "current_provider": provider or "none",
         "processes": {name: processes.get(name, {"state": "UNKNOWN", "detail": ""})
-                      for name in ("musicdl", "musicbox", "lxserver", "lxmusic", "webui")},
+                      for name in ("musicbox", "qqmusic", "lxserver", "lxmusic", "webui")},
         "previews": {p: round(preview_seconds_left(p)) for p in list(_preview_until)},
         "services": services,
         "lx_source": lx_source,
@@ -1159,7 +1159,7 @@ async def api_preview(body: PreviewBody, request: Request):
     """点选未启用的音源卡片：临时拉起进程供预览（不写 .env，倒计时自动停止）。"""
     provider = body.provider
     if provider not in PROVIDERS:
-        raise HTTPException(status_code=400, detail="provider 必须是 musicdl/musicbox/lxmusic 之一")
+        raise HTTPException(status_code=400, detail="provider 必须是 musicbox/qqmusic/lxmusic 之一")
     if provider == "lxmusic":
         enabled = current_provider(read_env()) == provider
         ready = await _lx_ensure_ready(request, preview=not enabled)
@@ -1475,12 +1475,6 @@ async def api_config_put(body: ConfigBody, request: Request):
                 after = read_env()
         else:
             await _lx_source_post({"url": after["LX_SOURCE_URL"]}, "", "activate")
-    elif new_provider == "musicdl" and (
-        "FNMUSIC_ONLINE_SOURCES" in changed or "MUSICDL_SOURCES" in changed
-    ):
-        code, out = supervisorctl("restart", "musicdl")
-        actions.append({"kind": "process", "program": "musicdl", "op": "restart",
-                        "ok": code == 0, "error": "" if code == 0 else out})
 
     # 预览收尾：保存启用的转正常驻，其余预览进程立即停止（常驻生效时保留 musicbox）
     actions.extend(preview_reconcile_after_save(keep_musicbox=resident_keep))
@@ -1586,19 +1580,6 @@ async def api_lx_upload(request: Request):
         return JSONResponse(content={"ok": False, "error": _lx_ready_error("webui_to_lxmusic", str(exc)),
                                      "category": "service_unavailable", "stage": "webui_to_lxmusic"},
                             status_code=503)
-
-
-@app.get("/api/platforms")
-async def api_platforms(request: Request):
-    preview_renew("musicdl")  # 预览期间查看平台列表视为活跃，续期倒计时
-    ok, data = await _fetch_json(request, f"{CONF['musicdl_url']}/sources")
-    if not ok:
-        return JSONResponse(
-            content={"ok": False, "error": data.get("error", "musicdl 服务不可达"),
-                     "hint": "musicdl 进程未启用时无法获取平台列表"},
-            status_code=503,
-        )
-    return {"ok": True, "enabled": data.get("enabled") or [], "registered": data.get("registered") or []}
 
 
 _public_discovery_cache: dict[tuple, tuple[float, bytes, str]] = {}
@@ -1744,7 +1725,7 @@ async def qqmusic_qr(id: str = Query(...), request: Request = None):
 @app.api_route("/api/qqmusic/auth/{path:path}", methods=["GET", "POST"])
 async def qqmusic_auth_proxy(path: str, request: Request):
     """透传 qqmusic 的 auth 接口（登录/轮询/状态/登出），路径段白名单内。"""
-    if path not in ("login", "login/check", "status", "logout"):
+    if path not in ("login", "login/check", "status", "logout", "cookie"):
         raise HTTPException(status_code=404, detail="unknown auth endpoint")
     preview_renew("qqmusic")  # 预览期间扫码/查状态视为活跃，续期倒计时
     client = get_http(request)
@@ -1985,7 +1966,7 @@ async def api_logs_export():
 async def index():
     # 静态资源 URL 带上版本号：升级后 URL 变化，浏览器 / 飞牛桌面 WebView 必定重新拉取。
     # 否则会停在「接口是新版、页面还是旧版」的错配上——表现为侧栏版本号已是 2.12.0，
-    # 音乐源页却仍显示已删除的 musicdl 卡片、看不到 QQ 音乐入口，健康列表出现 undefined。
+    # 音乐源页却看不到 QQ 音乐入口，健康列表出现 undefined。
     try:
         html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
     except OSError:

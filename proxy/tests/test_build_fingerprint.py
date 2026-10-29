@@ -43,13 +43,13 @@ services:
 DOCKERFILE = """\
 ARG BASE_IMAGE=python:3.13-slim
 FROM ${BASE_IMAGE}
-COPY musicdl-service/app.py musicdl-service/requirements.txt /srv/
+COPY qqmusic-service/app.py qqmusic-service/requirements.txt /srv/
 COPY webui-service/static/ /srv/static/
 COPY container/lxserver-artifact/ /srv/lxserver-artifact/
 """
 DOCKERIGNORE = """\
 *
-!musicdl-service/
+!qqmusic-service/
 !webui-service/
 !container/
 **/__pycache__/
@@ -89,14 +89,14 @@ def compute(repo):
 def make_repo(path: Path) -> Path:
     (path / "container/lxserver-artifact").mkdir(parents=True)
     (path / "proxy").mkdir()
-    (path / "musicdl-service").mkdir()
+    (path / "qqmusic-service").mkdir()
     (path / "webui-service/static").mkdir(parents=True)
     (path / "resolve_config.py").write_text(RESOLVER)
     (path / "docker-compose.yml").write_text(COMPOSE, encoding="utf-8")
     (path / "container/Dockerfile").write_text(DOCKERFILE, encoding="utf-8")
     (path / ".dockerignore").write_text(DOCKERIGNORE, encoding="utf-8")
-    (path / "musicdl-service/app.py").write_text("print('musicdl')\n", encoding="utf-8")
-    (path / "musicdl-service/requirements.txt").write_text("musicdl\n", encoding="utf-8")
+    (path / "qqmusic-service/app.py").write_text("print('qqmusic')\n", encoding="utf-8")
+    (path / "qqmusic-service/requirements.txt").write_text("qqmusic\n", encoding="utf-8")
     (path / "webui-service/static/app.js").write_text("console.log(1)\n", encoding="utf-8")
     (path / "container/lxserver-artifact/lxserver.zip").write_bytes(b"zip-bytes-v1")
     # shell 侧 compute_build_fingerprint 会执行 ${BASE_DIR}/proxy/build_fingerprint.py
@@ -124,8 +124,8 @@ def test_args_interpolation_env_over_dotenv_over_default(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize("path,content", [
-    ("musicdl-service/app.py", "changed"),
-    ("musicdl-service/requirements.txt", "changed"),
+    ("qqmusic-service/app.py", "changed"),
+    ("qqmusic-service/requirements.txt", "changed"),
     ("webui-service/static/app.js", "changed"),
     ("container/lxserver-artifact/lxserver.zip", "changed"),
     ("container/Dockerfile", DOCKERFILE + "# layer tweak\n"),
@@ -142,7 +142,7 @@ def test_fingerprint_tracks_build_inputs(tmp_path, path, content):
 def test_fingerprint_ignores_runtime_and_unrelated_changes(tmp_path):
     repo = make_repo(tmp_path / "repo")
     (repo / ".env").write_text(
-        "FNMUSIC_MUSICDL_ENABLED=true\nLX_SOURCES='kg,wy'\n", encoding="utf-8")
+        "FNMUSIC_QQMUSIC_ENABLED=true\nLX_SOURCES='kg,wy'\n", encoding="utf-8")
     baseline = compute(repo)
 
     (repo / "docker-compose.yml").write_text(COMPOSE + "# comment\n")
@@ -153,7 +153,7 @@ def test_fingerprint_ignores_runtime_and_unrelated_changes(tmp_path):
     assert bf.compute(repo, config) == baseline
     # 运行开关只影响进程集（重启容器生效），不参与镜像构建
     (repo / ".env").write_text(
-        "FNMUSIC_MUSICDL_ENABLED=false\nLX_SOURCES='mg'\n", encoding="utf-8")
+        "FNMUSIC_QQMUSIC_ENABLED=false\nLX_SOURCES='mg'\n", encoding="utf-8")
     assert compute(repo) == baseline
     # 未被 COPY 进镜像的文件：文档 / 测试 / 仓库外目录
     (repo / "docs").mkdir()
@@ -168,7 +168,7 @@ def test_fingerprint_ignores_runtime_and_unrelated_changes(tmp_path):
     (repo / "webui-service/static/__pycache__/app.cpython-311.pyc").write_bytes(b"\x00")
     assert compute(repo) == baseline
     # 只改修改时间（重写同内容）不影响指纹
-    app = repo / "musicdl-service/app.py"
+    app = repo / "qqmusic-service/app.py"
     content = app.read_text(encoding="utf-8")
     os.utime(app, (1, 1))
     app.write_text(content, encoding="utf-8")
@@ -471,7 +471,7 @@ def prepared_repo(tmp_path: Path) -> Path:
     stub_probe(repo, "docker.m.daocloud.io/library/python:3.13-slim")
     (repo / ".env").write_text(
         "FNMUSIC_BASE_IMAGE='docker.m.daocloud.io/library/python:3.13-slim'\n"
-        "FNMUSIC_MUSICDL_ENABLED=true\n", encoding="utf-8")
+        "FNMUSIC_QQMUSIC_ENABLED=true\n", encoding="utf-8")
     label_of(repo).write_text(compute(repo), encoding="utf-8")
     return repo
 

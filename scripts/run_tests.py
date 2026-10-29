@@ -25,7 +25,6 @@ PHASES = (
     {"proxy": ("proxy/tests",)},
     {
         "webui": ("webui-service",),
-        "musicdl": ("musicdl-service",),
         "qqmusic": ("qqmusic-service",),
         "lxmusic": ("lxmusic-service",),
     },
@@ -33,7 +32,7 @@ PHASES = (
 )
 SUITES = {name: paths for phase in PHASES for name, paths in phase.items()}
 COVERAGE_TARGETS = (
-    "proxy", "lxmusic-service", "musicdl-service", "musicbox-service", "qqmusic-service", "webui-service",
+    "proxy", "lxmusic-service", "musicbox-service", "qqmusic-service", "webui-service",
 )
 
 

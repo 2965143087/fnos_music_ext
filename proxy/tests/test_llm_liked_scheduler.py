@@ -43,7 +43,7 @@ def isolated_runtime(tmp_path, monkeypatch):
     pa.CONF.update(llm_base_url=rec.llm_base_url(), llm_model=rec.llm_model(),
                    llm_daily_enabled=False, llm_liked_enabled=True,
                    liked_size=20, liked_refresh_hours=0.5,
-                   musicdl_enabled=False, netease_enabled=False, lx_enabled=False,
+                   qqmusic_enabled=False, netease_enabled=False, lx_enabled=False,
                    recommend_daily=False, recommend_hot=False,
                    netease_my_playlists=False, public_playlists_enabled=False)
     for name in ("get_llm_client", "get_musicbox_client", "get_lx_client"):
@@ -571,7 +571,7 @@ def test_lifespan_starts_and_stops_scheduler_even_when_env_watch_off(monkeypatch
         monkeypatch.setattr(pa, "_log_retention_loop", idle)
         instance = FastAPI()
         instance.state.upstream_client = object()
-        instance.state.musicdl_client = object()
+        instance.state.qqmusic_client = object()
         instance.state.musicbox_client = object()
         instance.state.lx_client = object()
         instance.state.llm_client = object()

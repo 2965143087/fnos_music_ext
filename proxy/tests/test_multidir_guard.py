@@ -22,6 +22,8 @@ import time
 
 import pytest
 
+pytest.importorskip("fcntl", reason="proxy.takeover 依赖 POSIX fcntl，Windows 上跳过")
+
 BASE = Path(__file__).resolve().parents[2]
 _spec = importlib.util.spec_from_file_location('takeover_guard', BASE / 'proxy/takeover.py')
 takeover = importlib.util.module_from_spec(_spec)
@@ -299,7 +301,7 @@ def test_reclaim_container_rejects_foreign_owner(tmp_path):
     stub_dir = tmp_path / 'bin'
     stub_dir.mkdir()
     _docker_stub(stub_dir, tmp_path / 'other-checkout')
-    rc, out = _run_shell('reclaim_container fnmusic-musicdl; echo rc=$?',
+    rc, out = _run_shell('reclaim_container fnmusic-qqmusic; echo rc=$?',
                          checkout, extra_env={'PATH': f'{stub_dir}:{os.environ["PATH"]}'})
     assert 'rc=1' in out, out
     assert '不属于当前目录' in out
@@ -312,10 +314,10 @@ def test_reclaim_container_with_adopt_removes_foreign_container(tmp_path):
     stub_dir.mkdir()
     docker_log = tmp_path / 'docker.log'
     _docker_stub(stub_dir, tmp_path / 'other-checkout', log_file=docker_log)
-    rc, out = _run_shell('reclaim_container fnmusic-musicdl --adopt; echo rc=$?',
+    rc, out = _run_shell('reclaim_container fnmusic-qqmusic --adopt; echo rc=$?',
                          checkout, extra_env={'PATH': f'{stub_dir}:{os.environ["PATH"]}'})
     assert 'rc=0' in out, out
-    assert 'rm -f fnmusic-musicdl' in docker_log.read_text(encoding='utf-8')
+    assert 'rm -f fnmusic-qqmusic' in docker_log.read_text(encoding='utf-8')
 
 
 def test_reclaim_container_accepts_own_checkout(tmp_path):
@@ -324,7 +326,7 @@ def test_reclaim_container_accepts_own_checkout(tmp_path):
     stub_dir = tmp_path / 'bin'
     stub_dir.mkdir()
     _docker_stub(stub_dir, checkout)
-    rc, out = _run_shell('reclaim_container fnmusic-musicdl; echo rc=$?',
+    rc, out = _run_shell('reclaim_container fnmusic-qqmusic; echo rc=$?',
                          checkout, extra_env={'PATH': f'{stub_dir}:{os.environ["PATH"]}'})
     assert 'rc=0' in out, out
 

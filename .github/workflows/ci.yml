@@ -48,7 +48,6 @@ jobs:
         run: >
           python -m py_compile proxy/app.py proxy/recommend.py proxy/publicplaylists.py proxy/env_merge.py proxy/version.py
           lxmusic-service/app.py lxmusic-service/lxserver_client.py lxmusic-service/verify_source.py
-          musicdl-service/app.py musicdl-service/hardening.py
           musicbox-service/app.py musicbox-service/runner.py musicbox-service/netease_ext.py musicbox-service/playback.py
           webui-service/app.py
 
@@ -129,7 +128,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        service: [musicdl, musicbox, qqmusic, lxmusic]
+        service: [musicbox, qqmusic, lxmusic]
         python: ['3.11', '3.13']
     steps:
       - uses: actions/checkout@v4
@@ -141,7 +140,7 @@ jobs:
       - name: Offline dependency and CLI contract
         run: python tests/integration/production_contract.py '${{ matrix.service }}' --app-dir '${{ matrix.service }}-service'
 
-  # amd64 镜像只在下方矩阵构建一次，复用它验证 musicdl 与洛雪。
+  # amd64 镜像只在下方矩阵构建一次，复用它验证洛雪。
   # 不再另起 images job 重建相同 Dockerfile/参数及重复跑非 root 契约。
   # 双架构真实运行验证：amd64 原生构建，arm64 走 QEMU 用户态模拟，构建与冒烟
   # 都在目标架构里执行——锁定 sha256 的 ARM64 原生模块必须能被 Node 真实加载，
@@ -184,30 +183,12 @@ jobs:
           cache-to: type=gha,mode=max,scope=fnmusic-images-${{ matrix.arch }}
       - name: Verify non-root contract for each bundled service
         run: |
-          for svc in musicdl musicbox qqmusic lxmusic; do
+          for svc in musicbox qqmusic lxmusic; do
             docker run --rm --platform '${{ matrix.platform }}' --network none --user 1000 --entrypoint python \
               -v "$PWD/tests/integration/production_contract.py:/tmp/production_contract.py:ro" \
               fnmusic-sources:ci /tmp/production_contract.py \
               "$svc" --app-dir "/srv/${svc}-service" --require-non-root
           done
-      - name: Verify on-demand musicdl healthz
-        if: matrix.arch == 'x64'
-        run: |
-          mkdir -p /tmp/fnrepo
-          printf '%s\n' 'FNMUSIC_MUSICDL_ENABLED=true' 'FNMUSIC_WEBUI_ENABLED=false' > /tmp/fnrepo/.env
-          name="fnmusic-ci-sources"
-          trap 'docker logs "$name"; docker rm -f "$name"' EXIT
-          docker run -d --name "$name" --network none \
-            -v /tmp/fnrepo:/repo fnmusic-sources:ci
-          ready=0
-          for attempt in $(seq 1 40); do
-            if docker exec "$name" python -c 'import urllib.request; urllib.request.urlopen("http://127.0.0.1:8001/healthz", timeout=2)'; then
-              ready=1
-              break
-            fi
-            sleep 1
-          done
-          test "$ready" = 1
       - name: Verify WebUI startup and healthz
         if: matrix.arch == 'x64'
         run: |

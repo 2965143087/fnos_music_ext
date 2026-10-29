@@ -83,7 +83,7 @@ LXSERVER = LxServerClient(
 _SONG_CACHE: dict[str, dict] = {}
 # 播放直链缓存: (canonical_id, tier) -> {"data": dict | None, "ts": float}；data=None 为失败负缓存
 _URL_CACHE: dict[tuple[str, str], dict] = {}
-# 同键在途解析合并：key -> Future（与 musicdl SingleFlight 同型的 shielded-future 去重）
+# 同键在途解析合并：key -> Future（SingleFlight 式 shielded-future 去重）
 _URL_INFLIGHT: dict[tuple[int, str, str, bool], asyncio.Future] = {}
 # 源代计数：切源/重导入脚本时自增，代间在途解析的回写据此丢弃，防止串源
 _URL_CACHE_GEN = 0

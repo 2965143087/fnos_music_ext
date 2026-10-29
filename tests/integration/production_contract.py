@@ -93,7 +93,7 @@ def check_musicbox():
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("service", choices=["musicdl", "musicbox", "qqmusic", "lxmusic"])
+    parser.add_argument("service", choices=["musicbox", "qqmusic", "lxmusic"])
     parser.add_argument("--app-dir", type=Path, required=True)
     parser.add_argument("--require-non-root", action="store_true")
     args = parser.parse_args()
@@ -109,11 +109,6 @@ def main():
         assert module.app is not None
         if args.service == "musicbox":
             check_musicbox()
-        elif args.service == "musicdl":
-            from musicdl import musicdl
-            import curl_cffi
-            assert callable(musicdl.MusicClient)
-            assert curl_cffi.requests.Session
         elif args.service == "qqmusic":
             from qqmusic_api.modules.song import SongFileType
             import qqmusic_ext

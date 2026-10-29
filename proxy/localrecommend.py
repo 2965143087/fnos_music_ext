@@ -332,7 +332,6 @@ def list_user_guids(db_path: str) -> list[str]:
 def current_source_fingerprint(conf: dict | None = None) -> str:
     """Same normalized material for app CONF and default environment-only readers."""
     fields = {
-        "musicdl_enabled": ("FNMUSIC_MUSICDL_ENABLED", False),
         "netease_enabled": ("FNMUSIC_NETEASE_ENABLED", False),
         "lx_enabled": ("FNMUSIC_LX_ENABLED", False),
         "online_sources": ("FNMUSIC_ONLINE_SOURCES", "KuwoMusicClient,MiguMusicClient"),
@@ -756,7 +755,7 @@ async def build_llm_bundle(
                        and (lx_sources is None or platform in lx_sources)
                        and (lx_client is not None or verify_playable is not None))
         else:
-            return False  # Never use musicdl or arbitrary external identifiers.
+            return False  # Never use arbitrary external identifiers.
         return bool(enabled and (source_enabled is None or source_enabled(track) is True))
 
     online_ids, online_keys = set(), set()

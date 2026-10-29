@@ -104,7 +104,6 @@ global.setTimeout = (fn, ms, ...a) => {
 const defaults = new Map([
   ["/app/fnmusic-ext/api/config", { values: {} }],
   ["/app/fnmusic-ext/api/status", { version: "t", current_provider: "none", processes: {}, services: {}, lx_source: null }],
-  ["/app/fnmusic-ext/api/platforms", { ok: true, enabled: [], registered: [] }],
 ]);
 let routes = new Map(); // path -> bodies 队列（Error 表示 HTTP 非 2xx）
 const fetchCalls = [];  // 断言用：{path, method, body}
@@ -996,7 +995,7 @@ test("loadStatus：概览进程含 lxserver，不可达透出 healthz 详情并�
     version: "t",
     current_provider: "lxmusic",
     processes: {
-      musicdl: { state: "STOPPED", detail: "" },
+      qqmusic: { state: "STOPPED", detail: "" },
       lxserver: { state: "FATAL", detail: "" },
       lxmusic: { state: "RUNNING", detail: "" },
       webui: { state: "RUNNING", detail: "" },

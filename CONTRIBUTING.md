@@ -33,4 +33,4 @@ python3 tests/integration/source_smoke.py --base-url http://127.0.0.1:8773 --key
 
 该命令逐源低频搜索并解析一条结果，输出带时间戳的脱敏报告，不打印直链、不上传配置，也不把有限探活当作完整播放证明。公共第三方故障不进入确定性 PR 门禁。完整时长、解码和实际音质仍需使用获得授权的音频做独立验收。
 
-Default music source is [musicdl](https://github.com/CharlesPikachu/musicdl) wrapped by `musicdl-service/`.
+主音源三选一：`musicbox-service/`（网易云，封装 [musicbox](https://github.com/darknessomi/musicbox)）、`qqmusic-service/`（QQ 音乐）与 `lxmusic-service/`（洛雪）。

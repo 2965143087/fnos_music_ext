@@ -1,0 +1,3 @@
+#!/bin/bash
+if [ "$1" = info ]; then exit 1; fi
+printf '%s|%s|%s|%s|%s' "${FNMUSIC_BUILD_FINGERPRINT-unset}" "${FNMUSIC_BASE_IMAGE-unset}" "${FNMUSIC_PIP_INDEX-unset}" "${FNMUSIC_APT_MIRROR-unset}" "${UNRELATED-unset}"
