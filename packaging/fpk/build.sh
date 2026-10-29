@@ -139,6 +139,10 @@ MANIFEST_VER="$(echo "${VERSION}" | sed -E 's/([0-9]+\.[0-9]+\.[0-9]+).*/\1/')"
 sed "s/@VERSION@/${MANIFEST_VER}/" "${FPK_DIR}/manifest.in" > "${STAGE}/manifest"
 cp "${FPK_DIR}/ICON.PNG" "${FPK_DIR}/ICON_256.PNG" "${STAGE}/"
 cp -a "${FPK_DIR}/app/ui/." "${STAGE}/app/ui/"
+# 桌面入口 URL 带上版本号：飞牛桌面的 iframe 只在打开时取一次文档，升级不会让它
+# 重新拉取，于是窗口一直停在旧页面上（侧栏版本号是 js 实时拿的，所以对不上）。
+# URL 随版本变化，缓存键就变了，必定重新取。
+sed -i "s/@VERSION@/${VERSION}/g" "${STAGE}/app/ui/config"
 cp -a "${FPK_DIR}/cmd" "${STAGE}/cmd"
 cp -a "${FPK_DIR}/config" "${STAGE}/config"
 cp -a "${FPK_DIR}/wizard" "${STAGE}/wizard"
