@@ -26,6 +26,20 @@ services:
         APT_MIRROR: ${FNMUSIC_APT_MIRROR:-https://mirrors.tencent.com}
     image: fnmusic-sources:latest
     container_name: fnmusic-sources
+    # 入口脚本从挂载仓库取，不用镜像里烘焙的那一份。
+    # 原因：镜像按构建指纹复用，代码改了但指纹没变时（或构建失败回退旧镜像），
+    # 镜像里烘焙的 entrypoint 还是旧的，它不会做任何代码同步，于是容器一路跑着
+    # /srv 里的旧代码——页面还是旧版、已删除的音源卡片还在，刷新也没用。
+    # 取不到 /repo 时才回退镜像内版本，保证老环境仍能启动。
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        if [ -f /repo/container/entrypoint.sh ]; then
+          exec /bin/sh /repo/container/entrypoint.sh "$@"
+        fi
+        exec /usr/local/bin/entrypoint.sh "$@"
+      - sh
     ports:
       - "127.0.0.1:8770:8002"  # musicbox（仅本机；扫码走已登录的 WebUI）
       - "127.0.0.1:8775:8006"  # qqmusic（仅本机；扫码走已登录的 WebUI）

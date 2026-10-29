@@ -68,19 +68,27 @@ sync_repo_code() {
     [ -d "${_repo}/webui-service" ] || return 0
     for _svc in musicbox-service qqmusic-service lxmusic-service webui-service; do
         [ -d "${_repo}/${_svc}" ] || continue
-        mkdir -p "/srv/${_svc}" 2>/dev/null || continue
-        if cp -a "${_repo}/${_svc}/." "/srv/${_svc}/" 2>/dev/null; then
+        mkdir -p "/srv/${_svc}" 2>/dev/null || {
+            log "WARN: /srv/${_svc} 不可写，沿用镜像内版本"
+            continue
+        }
+        # 用 cp -R 而不是 cp -a：-a 会尝试保留属主，非 root 下会报错，
+        # 从而把「文件其实已经复制好了」误判成失败。
+        if cp -R "${_repo}/${_svc}/." "/srv/${_svc}/" 2>/dev/null; then
             log "已同步 ${_svc} 代码 → /srv/${_svc}"
         else
             log "WARN: 同步 ${_svc} 失败，沿用镜像内版本"
         fi
     done
-    # 服务共用的 proxy 模块（与 Dockerfile 的 COPY 清单保持一致）
-    if [ -d "${_repo}/proxy" ]; then
-        for _mod in __init__ env_merge fnlog publicplaylists version llm_usage; do
-            [ -f "${_repo}/proxy/${_mod}.py" ] || continue
-            cp -a "${_repo}/proxy/${_mod}.py" /srv/proxy/ 2>/dev/null || true
+    # webui 运行期会 import 这些 proxy 模块。这里整目录同步而不是抄一份固定清单：
+    # 之前按清单只同步了 6 个模块，新增/改名的模块会被静默漏掉，等于换个位置再犯
+    # 一次「代码是旧的」的错。
+    if [ -d "${_repo}/proxy" ] && [ -d /srv/proxy ]; then
+        for _f in "${_repo}"/proxy/*.py; do
+            [ -f "${_f}" ] || continue
+            cp -f "${_f}" /srv/proxy/ 2>/dev/null || true
         done
+        log "已同步 proxy 模块 → /srv/proxy"
     fi
 }
 

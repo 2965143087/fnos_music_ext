@@ -1974,7 +1974,14 @@ async def index():
     stamp = quote(_read_version(), safe="")
     for asset in ("theme-boot.js", "style.css", "app.js"):
         html = html.replace(f"static/{asset}\"", f"static/{asset}?v={stamp}\"")
-    return Response(content=html, media_type="text/html")
+    # 文档本身也要禁缓存：只给静态资源加 ?v 是不够的——HTML 一旦被浏览器/飞牛桌面
+    # WebView 缓存住，里面的 ?v= 根本不会刷新，页面就永远停在旧版（还带着早已删除
+    # 的音源卡片）。侧栏版本号走接口所以是新的，页面却是旧的，正是这么来的。
+    return Response(content=html, media_type="text/html", headers={
+        "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+        "Pragma": "no-cache",
+        "Expires": "0",
+    })
 
 
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
