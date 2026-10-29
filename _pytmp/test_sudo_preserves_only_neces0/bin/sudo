@@ -1,5 +1,0 @@
-#!/bin/bash
-if [ "$1" = docker ] && [ "$2" = info ]; then exit 0; fi
-[ "$1" = env ] || exit 97
-shift
-exec /usr/bin/env -i PATH="$PATH" "$@"
