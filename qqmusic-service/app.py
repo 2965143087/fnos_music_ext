@@ -45,6 +45,18 @@ def _lib_missing(exc: Exception) -> HTTPException:
 
 @asynccontextmanager
 async def lifespan(application):
+    # 启动自愈：容器重启后本地凭证往往还在，但票据可能已被 QQ 侧轮换掉——
+    # 表现为「重启后要重新登录才恢复 VIP」。这里主动续期一次，能续期的账号
+    # 无需人工介入；续不了（Cookie 登录没有 refresh_token）也只记日志，不挡启动。
+    try:
+        state = qqmusic_ext.credential_state()
+        logger.info("qqmusic 启动登录态: %s", state)
+        if state.get("logged_in"):
+            refreshed = await qqmusic_ext.refresh_if_needed(force=True)
+            logger.info("qqmusic 启动续期: %s",
+                        "已换新票据" if refreshed else "未续期，沿用磁盘上的凭证")
+    except Exception as exc:  # noqa: BLE001  登录态检查失败绝不能挡住服务启动
+        logger.warning("qqmusic 启动登录态检查失败: %s", exc)
     try:
         yield
     finally:
@@ -286,4 +298,10 @@ def public_playlist_capabilities():
 
 @app.get("/api/v1/debug/credential")
 def debug_credential():
-    return {"ok": True, "data": qqmusic_ext.credential_public(), "data_dir": str(qqmusic_ext.data_dir())}
+    """排障入口：同时给出脱敏摘要与「文件在不在、能不能续期、是否过期」。"""
+    return {
+        "ok": True,
+        "data": qqmusic_ext.credential_public(),
+        "state": qqmusic_ext.credential_state(),
+        "data_dir": str(qqmusic_ext.data_dir()),
+    }

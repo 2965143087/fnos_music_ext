@@ -404,6 +404,12 @@ async def song_url(mid: str, quality: str = "lossless") -> dict[str, Any]:
     返回 {"code":200,"url":...} 或 {"code":<上游码>,"url":""}；
     code 语义对齐 musicbox：200 成功、404 无资源、其余为上游拒绝。
     """
+    try:
+        cred = current_credential()
+        if is_logged_in() and cred.is_expired():
+            await refresh_if_needed()
+    except Exception as exc:  # noqa: BLE001  续期失败不阻塞取链，让上游报真实错误
+        logger.debug("qqmusic pre-play refresh skipped: %s", exc)
     client = await get_client()
     _, _, _, _, SongFileInfo, _ = _import_api()
     file_type_name = QUALITY_MAP.get(str(quality or "").strip().lower(), "MP3_128")
@@ -748,16 +754,55 @@ async def login_with_cookie(raw: str) -> dict[str, Any]:
     return info
 
 
-async def refresh_if_needed() -> bool:
-    """凭证过期时尝试刷新；返回刷新后是否仍可用。"""
+def credential_state() -> dict[str, Any]:
+    """登录态体检：区分「文件没了」和「凭证被上游拒绝了」。
+
+    重启后掉线最常见的两种成因——数据卷里根本没存下凭证，或凭证还在但
+    票据已被 QQ 侧判失效——在日志里长得一模一样，靠这个把两者分开。
+    """
+    path = _credential_path()
+    cred = current_credential()
+    state: dict[str, Any] = {
+        "path": str(path),
+        "exists": path.exists(),
+        "logged_in": is_logged_in(),
+        "musicid": getattr(cred, "musicid", 0),
+        "login_type": getattr(cred, "login_type", 0),
+        # Cookie 登录没有 refresh_token，票据过期只能重新登录，无法自动续期
+        "refreshable": bool(getattr(cred, "refresh_token", "")),
+        "expired": None,
+        "mtime": 0,
+    }
+    try:
+        state["expired"] = bool(cred.is_expired())
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        state["mtime"] = int(path.stat().st_mtime)
+    except OSError:
+        pass
+    return state
+
+
+async def refresh_if_needed(force: bool = False) -> bool:
+    """刷新凭证；返回刷新后是否仍可用。
+
+    force=True 时不看本地过期时间直接换新票据：容器重启后本地算出来的
+    「未过期」并不可信——票据可能早已被 QQ 侧轮换掉，正是「重启后要重新登录」
+    的成因。启动时用 force 主动换一次，能续期的账号就不必再手动登录。
+    """
     if not is_logged_in():
         return False
     cred = current_credential()
-    try:
-        if not cred.is_expired():
+    if not force:
+        try:
+            if not cred.is_expired():
+                return True
+        except Exception:  # noqa: BLE001
             return True
-    except Exception:  # noqa: BLE001
-        return True
+    if not getattr(cred, "refresh_token", ""):
+        logger.info("qqmusic 凭证无 refresh_token（Cookie 登录），无法自动续期")
+        return False
     client = await get_client()
     try:
         new_cred = await client.login.refresh_credential()

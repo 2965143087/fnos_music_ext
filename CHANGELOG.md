@@ -5,6 +5,28 @@
 
 ## [Unreleased]
 
+## [2.13.3] - 2026-11-05
+
+### 修复
+
+- **重启后 QQ 音乐要重新登录，VIP 曲目播不了**。凭证文件本身没丢（构建机上验证过：
+  `/data/qqmusic/credential.json` 在 `docker restart` 与删容器重建后都在，
+  `/api/v1/auth/status` 依然 `logged_in: true`），问题在于**服务启动时从不续期**——
+  本地算出来的「未过期」不可信，票据可能早已被 QQ 侧轮换掉，于是取链被拒，
+  表现为掉登录。
+
+  改动：
+  1. 启动时主动强制续期一次（`refresh_if_needed(force=True)`）：有 `refresh_token`
+     的扫码登录账号直接换新票据，无需人工重新登录。
+  2. 取链前若判定已过期，先续期再请求，避免首次播放直接失败。
+  3. 新增 `credential_state()` 并接进 `/api/v1/debug/credential`，同时把登录态打进
+     启动日志——能一眼区分「文件没了」「没有 refresh_token」「票据被上游拒绝」，
+     不用再靠现象猜。
+
+### 说明
+
+- **Cookie 登录没有 `refresh_token`，无法自动续期**。票据被 QQ 轮换后只能重新粘贴
+  Cookie。扫码登录的账号能自动续期，日常使用建议优先扫码。
 ## [2.13.2] - 2026-10-29
 
 ### 修复

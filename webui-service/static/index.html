@@ -117,7 +117,7 @@
           </div>
           <div class="card">
             <div class="card-title">或用 Cookie 登录</div>
-            <p class="hint">扫码不方便时（比如手机就在这台机器上、没法自己扫自己），可以在电脑浏览器打开 music.qq.com 并登录，按 F12 打开开发者工具，在 Network 里点任意一条请求，从 Request Headers 复制整条 Cookie 粘到下面。只需要其中的 uin 与 qm_keyst（或 qqmusic_key），其余字段会被忽略。</p>
+            <p class="hint">扫码不方便时（比如手机就在这台机器上、没法自己扫自己），可以在电脑浏览器打开 music.qq.com 并登录，按 F12 打开开发者工具，在 Network 里点任意一条请求，从 Request Headers 复制整条 Cookie 粘到下面。只需要其中的 uin 与 qm_keyst（或 qqmusic_key），其余字段会被忽略。Cookie 里的票据有效期由 QQ 决定、也没有续期凭据，被轮换后只能重新粘贴；想让它自动续期，请优先用上面的扫码登录。</p>
             <textarea class="input" id="qq-cookie" rows="3" spellcheck="false"
                       placeholder="uin=123456789; qm_keyst=...; qqmusic_key=..."></textarea>
             <div class="btn-row">
