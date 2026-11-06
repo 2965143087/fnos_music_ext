@@ -106,6 +106,8 @@ function switchPage(page) {
   const storageTitle = $("#nav-storage-title");
   if (storageTitle) storageTitle.classList.toggle("active", page === "tee" || page === "dirs");
   if (page === "about") loadAbout().catch((exc) => { $("#about-logs").textContent = "加载失败：" + exc.message; });
+  // 回到概览时补一次：启动阶段若被前一步拖挂，这里能自愈，不必整页刷新
+  if (page === "overview") loadStatus();
 }
 $$("[data-page]").forEach((btn) => btn.addEventListener("click", () => switchPage(btn.dataset.page)));
 const storageTitleBtn = $("#nav-storage-title");
@@ -211,9 +213,17 @@ async function initTheme() {
 }
 
 /* -------------------------------------------------------------- 概览 */
+function withTimeout(ms, fn) {
+  // fetch 没有默认超时：上游卡住时 Promise 永不 settle，页面就永远停在「加载中…」。
+  const ctrl = typeof AbortController === "function" ? new AbortController() : null;
+  const timer = ctrl ? setTimeout(() => ctrl.abort(), ms) : null;
+  const p = fn(ctrl ? { signal: ctrl.signal } : {});
+  return timer ? p.finally(() => clearTimeout(timer)) : p;
+}
+
 async function loadStatus() {
   try {
-    const st = await api("/api/status");
+    const st = await withTimeout(12000, (opt) => api("/api/status", opt));
     $("#brand-version").textContent = `v${st.version}`;
     $("#sidebar-foot").textContent = `${PROVIDER_LABEL[st.current_provider] || st.current_provider}`;
     $("#ov-provider-body").innerHTML =
@@ -256,7 +266,17 @@ async function loadStatus() {
       lxCard.hidden = true;
     }
   } catch (exc) {
-    $("#ov-provider-body").textContent = "状态加载失败：" + exc.message;
+    console.error("[fnmusic] /api/status 失败:", exc);
+    const box = $("#ov-provider-body");
+    const reason = exc && exc.name === "AbortError"
+      ? "请求超时（12 秒无响应，可能是容器内 supervisor 无响应）"
+      : (exc && exc.message) || String(exc);
+    box.innerHTML = `<span class="state-line"><span class="dot err"></span>状态加载失败：${escapeHtml(reason)}</span>`;
+    const retry = document.createElement("button");
+    retry.className = "btn";
+    retry.textContent = "重试";
+    retry.addEventListener("click", () => { box.textContent = "加载中…"; loadStatus(); });
+    box.appendChild(retry);
   }
 }
 
@@ -2017,10 +2037,23 @@ window.addEventListener("keydown", (ev) => {
 /* -------------------------------------------------------------- 启动 */
 (async function boot() {
   initTheme().catch(() => {});  // 外观先应用（内部等宿主 SDK，不阻塞配置加载）
-  await loadConfig();
+  // 每一步单独兜住：以前串行 await，任意一步抛错都会让后面的 loadStatus 与
+  // 15 秒轮询彻底不执行，概览就永远停在「加载中…」——而其他页看起来一切正常。
+  try {
+    await loadConfig();
+  } catch (exc) {
+    console.error("[fnmusic] 配置加载失败:", exc);
+    if (typeof toast === "function") toast("配置加载失败：" + exc.message, "fail");
+  }
   await loadStatus();
   checkUpdate();  // 进页面即查（后端 TTL 缓存兜住 GitHub 限额），不阻塞启动
-  await loadPlatforms(false);  // 页面加载不自动拉起预览进程，等用户点选音源
-  if ($("#public-playlists-enabled").checked) await showPublicBrowser();
+  try {
+    await loadPlatforms(false);  // 页面加载不自动拉起预览进程，等用户点选音源
+  } catch (exc) {
+    console.error("[fnmusic] 平台信息加载失败:", exc);
+  }
+  if ($("#public-playlists-enabled").checked) {
+    try { await showPublicBrowser(); } catch (exc) { console.error("[fnmusic] 公共歌单加载失败:", exc); }
+  }
   setInterval(loadStatus, 15000);
 })();
