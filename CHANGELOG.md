@@ -5,6 +5,25 @@
 
 ## [Unreleased]
 
+## [2.13.5] - 2026-11-06
+
+### 修复
+
+- **概览页始终「加载中…」的真正原因：`renderPlatformChips is not defined`**。
+  2.13.0 移除 musicdl 时，`renderPlatformChips()`（musicdl 平台表的渲染函数）被一并
+  删除，但 `applyConfigToForm()` 末尾的调用点漏掉了。这一行抛 `ReferenceError`：
+  - `applyConfigToForm` 中断 → `loadConfig` 失败 → `boot()` 链断在第一步
+  - `loadStatus` 与 15 秒轮询不执行 → 概览停在初始 DOM、侧栏版本号停在「管理台」
+  - 因为抛错位置在表单回填**之后**，音乐源页的开关与选中态看起来完全正常
+  这正是「概览不显示、功能却正常」的全貌。
+
+  同时清掉另外两处同类残留：`boot()` 里的 `loadPlatforms(false)` 与只服务于
+  musicdl 的全局 `platforms` 变量。
+
+### 补充
+
+- 2.13.4 把 `boot()` 改成逐步隔离，报错才浮到界面上（红色提示条）。没有那一步，
+  这个异常至今仍被吞在启动链里。
 ## [2.13.4] - 2026-11-06
 
 ### 修复

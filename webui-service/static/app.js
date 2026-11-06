@@ -13,7 +13,6 @@ const PROC_LABEL = { musicbox: "musicbox", qqmusic: "qqmusic", lxserver: "lxserv
 
 let configValues = {};   // GET /api/config 的 values
 let configPresence = {}; // .env 显式存在的键（区分默认空与管理员清空）
-let platforms = { enabled: [], registered: [] };
 let dirty = false;
 let qrTimer = null;
 let lxVerifiedUrl = null; // 已通过测试的 lx URL（保存时免二次校验提示用）
@@ -364,7 +363,9 @@ function applyConfigToForm() {
   }
   renderLxSourceList();
   syncLxAddButton();
-  renderPlatformChips();
+  // 这里原本还有 renderPlatformChips()：那是 musicdl 平台表的渲染函数，随 musicdl
+  // 一起删掉了，调用点漏在这里。它抛 ReferenceError 会让整个 applyConfigToForm 失败，
+  // 进而 loadConfig 失败、boot 链断在第一步——概览页永远「加载中…」的元凶。
 }
 
 function collectConfig() {
@@ -2047,11 +2048,6 @@ window.addEventListener("keydown", (ev) => {
   }
   await loadStatus();
   checkUpdate();  // 进页面即查（后端 TTL 缓存兜住 GitHub 限额），不阻塞启动
-  try {
-    await loadPlatforms(false);  // 页面加载不自动拉起预览进程，等用户点选音源
-  } catch (exc) {
-    console.error("[fnmusic] 平台信息加载失败:", exc);
-  }
   if ($("#public-playlists-enabled").checked) {
     try { await showPublicBrowser(); } catch (exc) { console.error("[fnmusic] 公共歌单加载失败:", exc); }
   }
