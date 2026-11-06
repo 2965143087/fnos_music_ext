@@ -5,6 +5,30 @@
 
 ## [Unreleased]
 
+## [2.13.6] - 2026-11-06
+
+### 同步上游（仅健壮性，不含 musicdl / 大功能）
+
+本版从上游 `javycoder/fnos_music_ext` v2.12.0 摘取两处与音源无关的健壮性修复，
+其余（直连播放 Beta、七档音质、洛雪源管理、下载布局、LLM 账本）均未引入。
+
+- **容器日志根改到数据卷 `/data/logs`**（上游 `7e3a07fb`）。原先是 `/repo/logs`——
+  `/repo` 是宿主机挂载点，属主由宿主机决定，容器以 appuser 运行时可能不可写，
+  日志会静默丢失。上游是改 Dockerfile 的 ENV，本仓改在 `container/entrypoint.sh`
+  启动前覆盖 `FNMUSIC_LOG_DIR` 并 `mkdir -p`：效果一样，但**不触发镜像重建**
+  （改 Dockerfile 会让 apt/pip 层全部失效，重装要等十几分钟），旧镜像升级后也立即生效。
+  `proxy/fnlog.py` 的兜底路径同步改为 `/data/logs`。
+- **安装失败弹窗显示真实原因**（上游 `4f5f04f6`，issue #109）。原来只按 `[ERROR]`
+  方括号标记过滤，而真正的构建失败（apt 的 `E:` 行、`ERROR: failed to solve`）
+  根本不用这个标记，弹窗里只剩 BuildKit 回显的 Dockerfile 上下文与注释。
+  `packaging/fpk/cmd/_common` 现在同时匹配三类标记，并排除步骤标题
+  （`#12 [ 3/20] RUN ...`）、失败步骤行（`> [4/7] RUN ...`）与带行号的上下文
+  （`  28 | ...`），400 字上限留给真正的原因。
+
+### 说明
+
+- 上游 2.12.0 仍包含 `musicdl-service/`，本仓继续不引入。
+- 本次两条修复均可离线验证：日志路径断言、错误摘要对样例日志的提取结果。
 ## [2.13.5] - 2026-11-06
 
 ### 修复

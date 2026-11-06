@@ -96,6 +96,22 @@ sync_repo_code
 
 init_lxserver_config
 
+# 日志根改到数据卷：镜像里默认是 /repo/logs，而 /repo 是宿主挂载点，容器内
+# appuser 对它的写权限由宿主机属主决定，不可写时日志会静默丢失（排障时最要命）。
+# 在这里改而不是改 Dockerfile，是为了让旧镜像升级后也立即生效——改 Dockerfile
+# 会让 apt/pip 层全部失效，用户重装要等十几分钟。
+case "${FNMUSIC_LOG_DIR:-/repo/logs}" in
+    /repo/logs|"") FNMUSIC_LOG_DIR=/data/logs ;;
+esac
+export FNMUSIC_LOG_DIR
+# supervisord 要求日志目录必须已存在，否则解析配置即失败、全部音源起不来
+if ! mkdir -p "${FNMUSIC_LOG_DIR}" 2>/dev/null; then
+    FNMUSIC_LOG_DIR=/tmp/logs
+    export FNMUSIC_LOG_DIR
+    mkdir -p "${FNMUSIC_LOG_DIR}" 2>/dev/null || true
+fi
+log "日志目录: ${FNMUSIC_LOG_DIR}"
+
 supervisord -c "$SUP_CONF" &
 SUP_PID=$!
 

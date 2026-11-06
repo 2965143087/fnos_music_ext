@@ -39,14 +39,19 @@ fnmusic_fail() {
 }
 
 fnmusic_error_brief() {
-    # Installer [ERROR] lines for the App Center popup. BuildKit prints the
-    # whole RUN script as a step title; if that script contains echo "[ERROR]",
-    # a naive grep matches the title and the 300-char popup becomes fix_dns.
+    # 安装/构建错误行，供应用中心弹窗展示。匹配三类标记：安装器的 "[ERROR]"
+    # 前缀、纯 "ERROR:" 行（Dockerfile 里的指引、docker 的 "ERROR: failed to
+    # solve"）以及 apt 的 "E: " 行——真正的构建失败从不用方括号标记，只按
+    # 方括号 grep 会把真实原因整段漏掉（issue #109）。
+    # BuildKit 的回显必须排除：步骤标题（"#12 [ 3/20] RUN ..." 会复述整段 RUN
+    # 脚本）、失败步骤行（" > [4/7] RUN ..."）以及失败行附近带行号的上下文
+    # （"  28 | ..." / "  29 | >>> RUN ..."）。否则只是一句提到错误标记的注释
+    # 就会被当成错误行，把真正的原因挤出 400 字上限。
     local log="${1:-${FNMUSIC_LOG}}"
     [ -f "${log}" ] || return 0
     sed $'s/\x1b\\[[0-9;]*m//g' "${log}" 2>/dev/null \
-        | grep -a '\[ERROR\]' \
-        | grep -avE '\[ [0-9]+/[0-9]+\] RUN ' \
+        | grep -aE '\[ERROR\]|ERROR:|(^|[^A-Za-z])E: ' \
+        | grep -avE '\[ [0-9]+/[0-9]+\] RUN |^[[:space:]]*[0-9]+[[:space:]]*\||^[[:space:]]*> ' \
         | tail -n 5 \
         | tr '\n' ' ' \
         | { python3 -c 'import sys; sys.stdout.write(sys.stdin.read()[:400])' 2>/dev/null || cut -c1-400; }

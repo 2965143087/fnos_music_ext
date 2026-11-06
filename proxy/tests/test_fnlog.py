@@ -60,7 +60,7 @@ def test_log_dir_shared_repo_and_docker_fallback(tmp_path, monkeypatch):
     monkeypatch.delenv("FNMUSIC_HOME")
     monkeypatch.delenv("WEBUI_REPO_DIR")
     monkeypatch.setattr(fnlog, "__file__", str(tmp_path / "app" / "fnlog.py"))
-    assert fnlog.log_dir() == Path("/repo/logs")
+    assert fnlog.log_dir() == Path("/data/logs")
 
 
 def test_setup_logging_writes_file_and_idempotent(log_dir):
